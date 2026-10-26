@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.table import Table
 
+from jira_cli import write_cli
 from jira_cli.client import JiraClient
 from jira_cli.config import (
     UserError,
@@ -33,7 +34,7 @@ def common(parser: argparse.ArgumentParser) -> None:
         "--non-interactive",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Never prompt (all foundation commands are noninteractive).",
+        help="Fail on missing values instead of opening interactive prompts.",
     )
 
 
@@ -82,6 +83,7 @@ def parser() -> argparse.ArgumentParser:
             leaf.add_argument("--jql", required=True)
         if name == "completion":
             leaf.add_argument("shell", choices=["powershell"])
+    write_cli.add_parsers(commands, common)
     return root
 
 
@@ -89,7 +91,8 @@ def completion() -> str:
     """Static root completion needs neither credentials nor network access."""
     return """Register-ArgumentCompleter -Native -CommandName jira -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    'config','context','auth','metadata','issue','search','doctor','completion' |
+    'config','context','auth','metadata','issue','search','doctor','completion',
+    'create','comment','attach','set' |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object {
             [System.Management.Automation.CompletionResult]::new(
@@ -165,7 +168,7 @@ def remote(
             "authenticated_user": user.get("name"),
             "project": accessible.get("key"),
             "read_only_checks": "passed",
-            "writes_enabled": False,
+            "writes_require_preflight": True,
             "corporate_integration": (
                 "Read-only connection observed; controlled write verification pending."
             ),
@@ -248,7 +251,16 @@ def run(args: argparse.Namespace) -> None:
             or store.selection().project
             or config.defaults.project
         )
-        emit(remote(args, client, store, project), args, token.get_secret_value())
+        result = (
+            write_cli.execute(args, client, store, config, project)
+            if args.command in write_cli.COMMANDS
+            else remote(args, client, store, project)
+        )
+        emit(result, args, token.get_secret_value())
+        if isinstance(result, dict) and result.get("success") is False:
+            raise UserError(
+                "Attachment operation incomplete; inspect results before any retry."
+            )
     finally:
         client.close()
 

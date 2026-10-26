@@ -1,8 +1,10 @@
 # Jira CLI
 
 A local-first Windows CLI for Jira Data Center. S01 provides configuration,
-working context, read-only diagnostics, metadata, and issue discovery. Issue writes,
-personal workflows, reports, and the complete release handoff follow in S02–S05.
+working context, read-only diagnostics, metadata, and issue discovery. S02 adds
+metadata-validated issue and epic creation, comments, selected-file attachments,
+field edits, workflow transitions, and epic associations. Personal workflows,
+reports, and the complete release handoff follow in S03–S05.
 
 ## Install and configure
 
@@ -93,6 +95,83 @@ jira completion powershell | Out-String | Invoke-Expression
 Completion uses a static local command list and needs no credentials or network.
 Interactive issue/epic selection and richer completion belong to S03.
 
+## Issue and epic writes
+
+Only use writes against authorized corporate Jira projects and test issues. Every
+write command first checks the reported Server/Data Center version (8.14+ for PAT
+support) and its target's effective permissions. Creation, editing, and transitions
+also validate the current instance's field/transition metadata. This preflight is
+per command; a previous `doctor` run does not enable unchecked writes. Unsupported
+metadata schemas and ambiguous fields/values fail clearly, without guessing.
+
+```powershell
+jira create story --summary 'Investigate a test issue' --description-file '.\body.txt' --priority High --assignee username --epic WWRAP-100 --non-interactive
+jira create epic --summary 'Test epic' --field 'Epic Name=Test epic' --non-interactive
+jira create story --from '.\issue.yaml' --summary 'Explicit override' --no-context
+jira comment add 'Authorized test comment' --issue WWRAP-123
+jira comment add --file '.\comment.txt' --issue WWRAP-123
+jira attach '.\selected file.txt' '.\another selected file.pdf' --issue WWRAP-123
+jira set status 'In Progress' --issue WWRAP-123 --non-interactive
+jira set field priority High --issue WWRAP-123
+jira set field description --from-file '.\description.txt' --issue WWRAP-123
+jira set field labels '["review","test"]' --issue WWRAP-123
+jira set epic WWRAP-100 --issue WWRAP-123
+jira set epic --clear --issue WWRAP-123
+```
+
+Field and status names above are examples: use names or IDs advertised by your
+instance. `set status` sends a valid transition ID, never a raw status update.
+Transitions may require extra values such as `--field 'Resolution=Fixed'`. A field's
+metadata decides which values are permitted. `set field <field> --clear` clears an
+optional field; required and read-only fields cannot be cleared. Project and issue
+type moves are outside this command. Assignees must be active and assignable to the
+target, with assignment permission. Epic Link uses the field identified by Jira's
+Data Center Epic Link schema, and verifies the selected issue is an accessible Epic;
+there is no hardcoded custom-field number or assumption that a subtask parent is an
+Epic Link.
+
+Creation input is one YAML mapping of metadata field names or IDs to values:
+
+```yaml
+summary: Authorized test story
+description: A local UTF-8 description
+priority: High
+labels: [test, review]
+```
+
+`--field NAME=VALUE` overrides the file's same-named field. Dedicated arguments
+(`--summary`, `--priority`, `--assignee`, `--description-file`) then take precedence.
+Use quoted strings for identifier/date values in YAML. Extra required custom fields
+use `--field`; Epic Name is included only if the instance advertises it. Arrays use
+JSON on the command line, or native YAML lists in the input file. Creation never
+accepts a chosen issue key, project field override, or issue-type override: Jira
+allocates the key for the explicitly selected project and Story/Epic command.
+
+Missing required creation/transition values, field choices, and epic keys prompt
+only in an interactive terminal. `--non-interactive` and redirected stdin fail
+instead of prompting. Prompts go to stderr to preserve JSON stdout. Root-command
+completion is local; broader daily-workflow pickers remain in S03.
+
+Successful creation returns the server-assigned key and its URL, and then updates
+active context by default. `--no-context`, `creation.set_context_after_create=false`,
+or `context.persist=false` disables that update. Failed or uncertain creation never
+changes selection. If creation is confirmed but saving local context fails, the
+confirmed key is still returned with a warning; do not create it again.
+
+Writes are single-attempt requests. A timeout, server error, unexpected success
+status, or malformed success response reports an uncertain outcome: inspect Jira
+before any manual retry. No automatic write retry is sent. Error bodies and
+transport details stay out of output. No bulk mutation or unattended agent write
+facility is provided.
+
+Attachments accept explicitly named regular files only, validate the advertised
+upload limit, and never scan a directory. Each selected file uploads once. After
+the first failed or uncertain upload, remaining files are not attempted. JSON
+output reports each file as `uploaded`, `failed`, `uncertain`, or `not_attempted`;
+an incomplete operation exits 1. Preserve the successful results and inspect Jira
+before retrying uncertain files. A comment accepts inline text or one UTF-8 file,
+with no automatic context change.
+
 ## Development and validation
 
 ```sh
@@ -104,7 +183,8 @@ uv build
 
 Tests use in-process HTTPX mock transports and temporary configuration/state files;
 no corporate PAT or Jira instance is used. Coverage includes failure and pagination
-contracts, redaction, context precedence, and CLI output. Windows CI additionally
+contracts, redaction, context precedence, CLI output, permission gates, typed field
+metadata, uncertain writes, and partial attachment outcomes. Windows CI additionally
 builds the wheel, installs it through uv, executes `jira.exe`, and loads its
 PowerShell completion. A local macOS pass does not attest a Windows CI pass.
 
@@ -122,6 +202,8 @@ Planning Increment: R1 — Jira CLI Initial Release, Version ID 28.
 FR-04, FR-12, and QR-security from the
 [approved workbook](https://docs.google.com/spreadsheets/d/1I8nfLlJfabjrG7c9QThGA1X3Xf1RvKf_uTAmzkTFud8/edit)
 and [requirements](https://docs.google.com/document/d/1vuodIc88J8FoNRge8-VOiwapaIwMXtVpAjK8FlyYl6k/edit).
+[S02](https://projects.woodhost.cloud/work_packages/566) covers FR-02, FR-05, FR-06,
+FR-07, and QR-safety, and depends on the completed S01 foundation.
 
 Root `pyproject.toml` declares project/Initiative/release IDs and the integration
 contract. Story feature branches start from development and PRs target development.
@@ -136,3 +218,4 @@ template checkout and its local commits were preserved.
 
 API references: [Atlassian PAT authentication](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html)
 and [Jira Data Center REST examples](https://developer.atlassian.com/server/jira/platform/jira-rest-api-examples/).
+Write endpoint contract: [Jira Data Center issue API](https://developer.atlassian.com/server/jira/platform/rest/v10000/api-group-issue/).

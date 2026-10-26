@@ -51,7 +51,6 @@ def network(
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        assert request.method == "GET"
         assert request.headers["authorization"] == "Bearer fixture-pat-never-print"
         path = request.url.path.removeprefix("/jira/rest/api/2/")
         if path == "search":
@@ -64,7 +63,12 @@ def network(
                     "issues": [{"key": f"WWRAP-{start + 1}"}],
                 },
             )
-        value = routes.get(path, httpx.Response(404, text="fixture-pat-never-print"))
+        route = path if request.method == "GET" else request.method + " " + path
+        value = routes.get(route, httpx.Response(404, text="fixture-pat-never-print"))
+        if callable(value):
+            response = value(request)
+            assert isinstance(response, httpx.Response)
+            return response
         if isinstance(value, Exception):
             raise value
         return (

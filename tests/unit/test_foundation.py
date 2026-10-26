@@ -246,6 +246,7 @@ def test_readonly_cli_uses_bearer_and_redacts_output(
     assert "fixture-pat-never-print" not in output.out
     assert json.loads(output.out) is not None
     assert network[1]
+    assert all(r.method == "GET" for r in network[1])
     assert all(r.url.path.startswith("/jira/rest/api/2/") for r in network[1])
     assert not (application / "state.json").exists()
 
