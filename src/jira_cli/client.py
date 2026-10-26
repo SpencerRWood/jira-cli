@@ -119,7 +119,11 @@ class JiraClient:
             "issue/" + issue_key(key), {"fields": "*all", "expand": "names"}
         )
 
-    def search(self, jql: str) -> list[dict[str, Any]]:
+    def search(
+        self,
+        jql: str,
+        fields: str = "summary,status,priority,assignee,issuetype,updated",
+    ) -> list[dict[str, Any]]:
         issues: list[dict[str, Any]] = []
         start = 0
         while True:
@@ -129,7 +133,7 @@ class JiraClient:
                     "jql": jql,
                     "startAt": start,
                     "maxResults": 100,
-                    "fields": "summary,status,priority,assignee,issuetype,updated",
+                    "fields": fields,
                 },
             )
             rows = page.get("issues")

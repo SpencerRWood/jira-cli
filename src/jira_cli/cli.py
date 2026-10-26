@@ -10,8 +10,9 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.table import Table
 
-from jira_cli import write_cli
+from jira_cli import personal_cli, write_cli
 from jira_cli.client import JiraClient
+from jira_cli.completion import powershell
 from jira_cli.config import (
     UserError,
     application_directory,
@@ -53,7 +54,7 @@ def parser() -> argparse.ArgumentParser:
         "context": ["show", "set", "clear", "use-project"],
         "auth": ["test"],
         "metadata": ["project", "fields", "transitions"],
-        "issue": ["view", "list", "open"],
+        "issue": ["view", "list", "open", "select"],
     }.items():
         group = commands.add_parser(name)
         common(group)
@@ -84,22 +85,13 @@ def parser() -> argparse.ArgumentParser:
         if name == "completion":
             leaf.add_argument("shell", choices=["powershell"])
     write_cli.add_parsers(commands, common)
+    personal_cli.add_parsers(commands, common)
     return root
 
 
 def completion() -> str:
-    """Static root completion needs neither credentials nor network access."""
-    return """Register-ArgumentCompleter -Native -CommandName jira -ScriptBlock {
-    param($wordToComplete, $commandAst, $cursorPosition)
-    'config','context','auth','metadata','issue','search','doctor','completion',
-    'create','comment','attach','set' |
-        Where-Object { $_ -like "$wordToComplete*" } |
-        ForEach-Object {
-            [System.Management.Automation.CompletionResult]::new(
-                $_, $_, 'ParameterValue', $_)
-        }
-}
-"""
+    """Shell completion needs neither credentials nor network access."""
+    return powershell(parser())
 
 
 def redact(data: object, token: str) -> object:
@@ -196,9 +188,16 @@ def metadata(
 def issues(
     args: argparse.Namespace, client: JiraClient, store: ContextStore, project: str
 ) -> object:
-    if args.action == "list":
-        return client.search(
+    if args.action in {"list", "select"}:
+        if args.action == "select":
+            personal_cli.require_picker(args)
+        rows = client.search(
             f'project = "{project_key(project)}" ORDER BY updated DESC, key ASC'
+        )
+        return (
+            personal_cli.select(rows, args, client, store)
+            if args.action == "select"
+            else rows
         )
     key = store.issue(args.issue or args.key)
     if args.action == "open":
@@ -248,14 +247,16 @@ def run(args: argparse.Namespace) -> None:
         project = project_key(
             args.project
             or os.environ.get("JIRA_PROJECT")
-            or store.selection().project
+            or (store.selection().project if args.command != "my" else None)
             or config.defaults.project
         )
-        result = (
-            write_cli.execute(args, client, store, config, project)
-            if args.command in write_cli.COMMANDS
-            else remote(args, client, store, project)
-        )
+        result: object
+        if args.command in write_cli.COMMANDS:
+            result = write_cli.execute(args, client, store, config, project)
+        elif args.command in {"epic", "my"}:
+            result = personal_cli.execute(args, client, store, config, project)
+        else:
+            result = remote(args, client, store, project)
         emit(result, args, token.get_secret_value())
         if isinstance(result, dict) and result.get("success") is False:
             raise UserError(

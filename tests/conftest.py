@@ -53,7 +53,7 @@ def network(
         requests.append(request)
         assert request.headers["authorization"] == "Bearer fixture-pat-never-print"
         path = request.url.path.removeprefix("/jira/rest/api/2/")
-        if path == "search":
+        if path == "search" and path not in routes:
             start = int(request.url.params["startAt"])
             return httpx.Response(
                 200,
