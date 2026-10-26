@@ -1,0 +1,27 @@
+jira:
+  base_url: https://jira.company.example
+  deployment: data_center
+  auth:
+    method: pat
+    token_env: JIRA_PAT
+defaults:
+  project: WWRAP
+  issue_type: Story
+creation:
+  set_context_after_create: true
+context:
+  persist: true
+  scope: directory
+  fallback_to_global: true
+epics:
+  default_filter: relevant
+  include_assigned_open: true
+  include_with_my_active_stories: true
+  include_completed_epics_with_active_stories: true
+reporting:
+  default_project: WWRAP
+  aging_threshold_days: 14
+  weekly_lookback_days: 7
+output:
+  format: table
+  show_issue_urls: true

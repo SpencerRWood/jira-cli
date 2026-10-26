@@ -1,0 +1,31 @@
+name: Windows foundation
+on:
+  pull_request:
+    branches: [development, main]
+  push:
+    branches: [development]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest --cov=jira_cli --cov-report=term-missing
+      - run: uv build
+      - name: Verify global installation and PowerShell entrypoint
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem dist/*.whl).FullName
+          uv tool install --python 3.14 $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $jira = Join-Path (uv tool dir --bin) 'jira.exe'
+          & $jira --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $jira completion powershell | Out-String | Invoke-Expression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
