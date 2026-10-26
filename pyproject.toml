@@ -10,10 +10,13 @@
 "requires-python" = ">=3.14"
 "authors" = [{ "name" = "Spencer Wood" }]
 "classifiers" = ["Development Status :: 3 - Alpha", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.14", "Typing :: Typed"]
-"dependencies" = []
+"dependencies" = ["httpx>=0.28", "pydantic>=2.12", "PyYAML>=6", "python-dotenv>=1", "rich>=14"]
+
+[project.scripts]
+jira = "jira_cli.cli:main"
 
 ["dependency-groups"]
-"dev" = ["coverage[toml]", "mypy", "pre-commit", "pytest", "pytest-cov", "python-semantic-release", "ruff"]
+"dev" = ["coverage[toml]", "mypy", "pre-commit", "pytest", "pytest-cov", "python-semantic-release", "ruff", "types-PyYAML"]
 
 ["tool"]
 
@@ -99,13 +102,29 @@
 "capability" = "jira-issue-management"
 "kind" = "python-cli"
 
-["tool"."wood"."openproject"]
-"project_id" = 9
-"initiative_id" = 570
-"release_id" = 28
+[tool.wood.openproject]
+project_id = 9
+initiative_id = 570
+release_id = 28
 
-["tool"."wood"."branching"]
-"strategy" = "integration"
-"release_id" = 28
-"integration_branch" = "development"
-"scope_reference" = "https://projects.woodhost.cloud/work_packages/565; approved Jira CLI R1 workbook and user request to start S01 from the Python library template on 2026-10-26"
+[tool.wood.branching]
+strategy = "integration"
+release_id = 28
+integration_branch = "development"
+scope_reference = "https://projects.woodhost.cloud/work_packages/565; approved Jira CLI R1 workbook and user request to start S01 from the Python library template on 2026-10-26"
+
+[tool.wood.verify]
+version = 1
+retry_safe = true
+
+[[tool.wood.verify.checks]]
+name = "installed-entrypoint"
+argv = ["uv", "run", "--active", "--frozen", "jira", "--help"]
+required = true
+timeout_seconds = 30
+
+[[tool.wood.verify.checks]]
+name = "powershell-completion"
+argv = ["uv", "run", "--active", "--frozen", "jira", "completion", "powershell"]
+required = true
+timeout_seconds = 30
