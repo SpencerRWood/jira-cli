@@ -5,7 +5,8 @@ working context, read-only diagnostics, metadata, and issue discovery. S02 adds
 metadata-validated issue and epic creation, comments, selected-file attachments,
 field edits, workflow transitions, and epic associations. S03 adds personal daily
 workflows, Epic discovery, local context pickers, and command-aware completion.
-Reports and the complete release handoff follow in S04–S05.
+S04 adds daily, weekly, and aging reports with explicit local exports.
+The complete Windows release handoff follows in S05.
 
 ## Install and configure
 
@@ -150,6 +151,74 @@ require an interactive terminal, table output, and enabled context persistence;
 without prompting. Scripts should use explicit keys or `context set KEY`.
 Status selection continues to use Jira's valid transition choices in `set status`.
 
+## Reports and local exports
+
+```powershell
+jira report daily
+jira report weekly --mine --project WWRAP --since 2026-10-19 --format json
+jira report aging --format csv --output '.\private reports\aging.csv'
+jira report weekly --format markdown --output '.\private reports\weekly.md'
+```
+
+Reports default to `reporting.default_project` (WWRAP). `JIRA_PROJECT` and explicit
+`--project` override that value, in that order. Saved working context does not
+alter report scope. `--mine` restricts current assignee to the authenticated user;
+omitting it includes accessible issues in the selected project. `--issue` is
+unsupported for project reports. Every request is GET-only and leaves context
+unchanged. No reports are scheduled, uploaded, or sent to external services.
+
+Daily reports include currently active issues, observed blockers, and overdue
+flags. Active means Jira status category outside Done, independently of resolution.
+Aging reports include active issues last updated **at least**
+`reporting.aging_threshold_days` days ago (default 14). An explicit `--since
+YYYY-MM-DD` limits daily/aging rows to last updates on or after that UTC date;
+without it, older active issues remain included. The window start shown for these
+snapshots defaults to midnight UTC; it does not remove older current work.
+
+Weekly reports distinguish `completed_at` events, `currently_active` work, and
+`carried_over` work. Completion means an observed transition from a non-Done status
+category into Done in **[start, end)**. A reopened issue can have completion events
+and remain active. An old Done issue is not counted simply because it is Done now,
+and a Done-to-Done status transition is not another completion. Carried over means
+currently active, created before start, and also non-Done at start. Counts represent
+distinct issues, while `completed_at` preserves each qualifying transition.
+
+The weekly default is the rolling `reporting.weekly_lookback_days` (7) before one
+captured observation time; `--since` replaces the start with midnight UTC on the
+chosen date. Every format records UTC, the start, exclusive end, thresholds, counts,
+and definitions. Dates and history timestamps are normalized to UTC. Due dates are
+overdue before the observation UTC date; staleness uses elapsed time. Sorting by
+issue key and fixed time inputs make fixture reports reproducible. Jira searches
+page through the current project/assignee scope and filter timestamps locally to
+avoid interpreting JQL date literals in a different Jira user time zone.
+
+For weekly history, the CLI reads Data Center issue `expand=changelog` and maps
+status IDs to the instance's current status-category metadata. It checks the
+returned history is complete and reconciles transitions against the current
+status. Missing/deleted status metadata, inaccessible or truncated history, and
+issues changing during collection fail the report without producing a partial
+export. No unsupported Cloud history endpoint is substituted. Current category
+definitions and current project/assignee visibility apply; this is not historical
+ownership attribution or a reconstruction of past category configuration. Actual
+corporate history availability must be verified inside the corporate network.
+
+`--format table|json|csv|markdown` works before or after report subcommands. JSON
+contains the full report object. CSV has one `record_type=metadata` row containing
+JSON metadata, followed by `record_type=issue` rows; empty reports retain metadata.
+Arrays use JSON cells. CSV formula prefixes are neutralized with a leading apostrophe.
+Text controls/newlines and non-ASCII are escaped in textual exports, and Markdown
+content is escaped to avoid active links/images or injected table rows. Blocker
+rules and explicitly labeled inferred risks match My Today.
+
+Without `--output`, the report goes to stdout. `--quiet` suppresses stdout; an
+explicit output file is still written. `--output` creates one UTF-8 file atomically
+in an existing local directory and refuses to overwrite any existing file or link.
+No raw issue bodies, comments, attachments, history authors, or credentials are
+exported. Known PAT values are redacted before rendering or saving. Reports still
+contain selected corporate issue data: choose an authorized local folder, apply
+corporate access/retention rules, and keep exports out of public repositories.
+On POSIX the new file is private to its owner; Windows directory ACLs apply.
+
 ## Issue and epic writes
 
 Only use writes against authorized corporate Jira projects and test issues. Every
@@ -255,6 +324,8 @@ access, and controlled live Jira reads and writes. Mocks cannot pass that gate.
 Planning Increment: R1 — Jira CLI Initial Release, Version ID 28.
 [S03](https://projects.woodhost.cloud/work_packages/567) covers FR-08, FR-09,
 FR-10, and FR-12, following S01 on the approved R1 dependency graph.
+[S04](https://projects.woodhost.cloud/work_packages/568) covers FR-11 and QR-data,
+following S01 and S03. Corporate integration remains a separate downstream gate.
 [S01](https://projects.woodhost.cloud/work_packages/565) references FR-01, FR-03,
 FR-04, FR-12, and QR-security from the
 [approved workbook](https://docs.google.com/spreadsheets/d/1I8nfLlJfabjrG7c9QThGA1X3Xf1RvKf_uTAmzkTFud8/edit)
