@@ -1,0 +1,17 @@
+"version" = 1
+
+["python"]
+"version" = "3.14"
+
+["validation"]
+"checks" = ["ruff", "ruff-format", "mypy", "pytest", "pytest-coverage", "pre-commit"]
+
+["coverage"]
+"target" = "jira_cli"
+
+["build"]
+"python_package" = true
+
+["release"]
+"semantic_release" = true
+"tag_merged_commit" = true

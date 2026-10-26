@@ -1,0 +1,21 @@
+{
+  "name": "Release",
+  "on": {
+    "push": {
+      "branches": [
+        "main"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "write"
+  },
+  "jobs": {
+    "release": {
+      "uses": "SpencerRWood/workflows/.github/workflows/release.yml@1b806a4ebce73dcab2f0ecf26ffc47b00fac8ef7",
+      "with": {
+        "workflow_revision": "1b806a4ebce73dcab2f0ecf26ffc47b00fac8ef7"
+      }
+    }
+  }
+}
