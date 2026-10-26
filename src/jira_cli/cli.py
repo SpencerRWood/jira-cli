@@ -10,10 +10,11 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.table import Table
 
-from jira_cli import personal_cli, write_cli
+from jira_cli import personal_cli, report_cli, reporting, write_cli
 from jira_cli.client import JiraClient
 from jira_cli.completion import powershell
 from jira_cli.config import (
+    Config,
     UserError,
     application_directory,
     load_config,
@@ -28,7 +29,9 @@ def common(parser: argparse.ArgumentParser) -> None:
     for name in ("issue", "project"):
         parser.add_argument("--" + name, default=argparse.SUPPRESS)
     parser.add_argument(
-        "--format", choices=["table", "json"], default=argparse.SUPPRESS
+        "--format",
+        choices=["table", "json", "csv", "markdown"],
+        default=argparse.SUPPRESS,
     )
     parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument(
@@ -86,6 +89,7 @@ def parser() -> argparse.ArgumentParser:
             leaf.add_argument("shell", choices=["powershell"])
     write_cli.add_parsers(commands, common)
     personal_cli.add_parsers(commands, common)
+    report_cli.add_parsers(commands, common)
     return root
 
 
@@ -224,6 +228,27 @@ def issues(
     }
 
 
+def reports(
+    args: argparse.Namespace, client: JiraClient, config: Config
+) -> dict[str, object]:
+    if args.issue:
+        raise UserError("Reports use project scope; --issue is unsupported.")
+    return reporting.build(
+        client,
+        config,
+        reporting.Request(
+            args.action,
+            project_key(
+                args.project
+                or os.environ.get("JIRA_PROJECT")
+                or config.reporting.default_project
+            ),
+            mine=args.mine,
+            since=args.since,
+        ),
+    )
+
+
 def run(args: argparse.Namespace) -> None:
     if args.command == "completion":
         if not args.quiet:
@@ -232,6 +257,8 @@ def run(args: argparse.Namespace) -> None:
     directory = application_directory()
     config = load_config(directory)
     args.format = args.format or config.output.format
+    if args.command != "report" and args.format not in {"table", "json"}:
+        raise UserError("CSV and Markdown formats require a report command.")
     store = ContextStore(directory, config)
     if args.command == "config":
         if args.action == "set":
@@ -244,6 +271,11 @@ def run(args: argparse.Namespace) -> None:
     token = read_pat(directory)
     client = JiraClient(config, token)
     try:
+        if args.command == "report":
+            report_cli.emit(
+                redact(reports(args, client, config), token.get_secret_value()), args
+            )
+            return
         project = project_key(
             args.project
             or os.environ.get("JIRA_PROJECT")

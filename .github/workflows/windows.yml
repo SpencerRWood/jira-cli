@@ -27,6 +27,8 @@ jobs:
           $jira = Join-Path (uv tool dir --bin) 'jira.exe'
           & $jira --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $jira report --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $jira completion powershell | Out-String | Invoke-Expression
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $cases = @{
@@ -34,6 +36,7 @@ jobs:
             'jira epic v' = 'view'
             'jira my today --sort p' = 'priority'
             'jira --project WWRAP epic list --with' = '--with-my-stories'
+            'jira report daily --format c' = 'csv'
           }
           foreach ($line in $cases.Keys) {
             $matches = (TabExpansion2 $line $line.Length).CompletionMatches.CompletionText
