@@ -1,12 +1,16 @@
-"""Read-only Jira Data Center REST v2 adapter; no write or unsafe retry surface."""
+"""Jira Data Center REST v2 transport, with single-attempt writes."""
 
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import quote
 
 import httpx
 from pydantic import SecretStr
 
 from jira_cli.config import Config, UserError, base_url, issue_key, project_key
+
+
+class WriteUncertainError(UserError):
+    """A write may have succeeded; inspect Jira before any manual retry."""
 
 
 class JiraClient:
@@ -27,6 +31,50 @@ class JiraClient:
 
     def close(self) -> None:
         self.http.close()
+
+    def write(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected: int,
+        body: dict[str, Any] | None = None,
+        files: dict[str, tuple[str, BinaryIO, str]] | None = None,
+    ) -> Any:
+        try:
+            response = self.http.request(
+                method,
+                path,
+                json=body,
+                files=files,
+                headers={"X-Atlassian-Token": "no-check"} if files else None,
+            )
+        except (httpx.RequestError, OSError) as exc:
+            raise WriteUncertainError(
+                "Write outcome uncertain; inspect Jira before retrying. "
+                "No retry was sent."
+            ) from exc
+        if response.status_code >= 500:
+            raise WriteUncertainError(
+                "Jira server error after a write; inspect Jira before retrying."
+            )
+        if response.status_code != expected and 200 <= response.status_code < 400:
+            raise WriteUncertainError(
+                "Unexpected write response; inspect Jira before retrying."
+            )
+        if response.status_code != expected:
+            raise UserError(
+                f"Jira rejected the write (HTTP {response.status_code}); "
+                "check metadata and permissions. No retry was sent."
+            )
+        if expected == 204:
+            return None
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise WriteUncertainError(
+                "Write response was invalid; inspect Jira before retrying."
+            ) from exc
 
     def get(self, path: str, params: dict[str, str | int] | None = None) -> Any:
         try:
@@ -111,7 +159,10 @@ class JiraClient:
         if not matches[0].get("id"):
             raise UserError("Jira issue type metadata is missing an ID.")
         type_id = quote(str(matches[0]["id"]), safe="")
-        return {"values": self.metadata_values(path + "/" + type_id)}
+        return {
+            "issueType": matches[0],
+            "values": self.metadata_values(path + "/" + type_id),
+        }
 
     def metadata_values(self, path: str) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []
