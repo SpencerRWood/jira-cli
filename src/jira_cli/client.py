@@ -6,6 +6,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import SecretStr
 
+from jira_cli import tls
 from jira_cli.config import Config, UserError, base_url, issue_key, project_key
 
 
@@ -25,7 +26,8 @@ class JiraClient:
             },
             timeout=httpx.Timeout(30, connect=10),
             follow_redirects=False,
-            # Keep TLS verification and enterprise proxy/certificate settings enabled.
+            verify=tls.context(),
+            # Explicit CA overrides and enterprise proxies remain supported.
             trust_env=True,
         )
 

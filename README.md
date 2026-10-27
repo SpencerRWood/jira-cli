@@ -39,6 +39,51 @@ written into YAML by `config set`. On Unix development hosts the equivalent app
 directory is `$XDG_CONFIG_HOME/jira-cli` or `~/.config/jira-cli`. It is a platform
 location rule, with no legacy configuration search or fallback loader.
 
+### Corporate Windows certificate trust
+
+HTTPS uses the operating system's managed certificate store through
+[`truststore`](https://truststore.readthedocs.io/), including the Windows certificate
+store on your work PC. If Windows already trusts the corporate Jira certificate
+chain, the CLI can use that trust without a separate PEM CA bundle. Certificates
+still require a valid chain and hostname; this does not bypass verification or
+install certificates into Windows. Corporate connectivity/PAT access must still
+be verified on the authorized work PC.
+
+Explicit process-level `SSL_CERT_FILE` or `SSL_CERT_DIR` settings override the
+system-store default, with the file taking precedence when both are set. Invalid
+overrides fail rather than switching trust sources. The application `.env` reads
+only `JIRA_PAT`; it does not load certificate or proxy variables. Existing
+HTTPX proxy variables and `NO_PROXY` remain effective.
+
+If you previously set a temporary CA override while troubleshooting, remove it
+from the current PowerShell process before testing managed Windows trust:
+
+```powershell
+Remove-Item Env:SSL_CERT_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:SSL_CERT_DIR -ErrorAction SilentlyContinue
+jira auth test --project WWRAP
+```
+
+Use those removal commands only for troubleshooting settings you added; preserve
+organization-required overrides. A globally installed copy must be rebuilt and
+reinstalled to receive this change. From a checkout containing this fix:
+
+```powershell
+$jiraBuildDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('jira-cli-build-' + [guid]::NewGuid())
+uv build --wheel --out-dir $jiraBuildDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Wheel build failed' }
+$jiraWheel = @(Get-ChildItem -Path $jiraBuildDirectory -Filter '*.whl')
+if ($jiraWheel.Count -ne 1) { throw 'Expected exactly one Jira CLI wheel' }
+uv tool install --python 3.14 --reinstall $jiraWheel[0].FullName
+if ($LASTEXITCODE -ne 0) { throw 'Tool installation failed' }
+jira auth test --project WWRAP
+```
+
+Run the final authentication command inside the corporate network after configuring
+the authorized Jira URL and PAT. A remaining certificate error means the chain,
+hostname, required proxy, or trust-store policy still needs investigation. Do not
+switch to HTTP, `verify=False`, or an unverified downloaded certificate.
+
 ## Foundation commands
 
 ```powershell
@@ -305,7 +350,9 @@ uv build
 ```
 
 Tests use in-process HTTPX mock transports and temporary configuration/state files;
-no corporate PAT or Jira instance is used. Coverage includes failure and pagination
+TLS tests additionally use a loopback HTTPS server with generated fixture CAs,
+without changing OS certificate stores or contacting corporate services. No
+corporate PAT or Jira instance is used. Coverage includes failure and pagination
 contracts, redaction, context precedence, CLI output, permission gates, typed field
 metadata, uncertain writes, and partial attachment outcomes. Windows CI additionally
 builds the wheel, installs it through uv, executes `jira.exe`, and loads its

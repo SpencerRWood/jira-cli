@@ -7,7 +7,14 @@ import pytest
 
 @pytest.fixture
 def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    for key in ["JIRA_PAT", "JIRA_BASE_URL", "JIRA_PROJECT", "XDG_CONFIG_HOME"]:
+    for key in [
+        "JIRA_PAT",
+        "JIRA_BASE_URL",
+        "JIRA_PROJECT",
+        "XDG_CONFIG_HOME",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    ]:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "App Data"))
     directory = tmp_path / "App Data" / "jira-cli"
