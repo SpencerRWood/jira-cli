@@ -58,3 +58,7 @@ Thumbs.db
 # Local project artifacts
 artifacts/
 output/
+
+# Local development guidance and bootstrap record
+/AGENTS.md
+/.wood-initialization.json
