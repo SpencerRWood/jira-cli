@@ -178,7 +178,7 @@ def epic_view(
         normalized["epic"] = key
         groups.setdefault(group, []).append(normalized)
     return {
-        **presenter.normalize(epic, detail=detail),
+        **presenter.normalize(epic, detail=detail, include_description=True),
         "story_scope": "all" if all_stories else "mine",
         "my_active_story_count": active,
         "completed_with_active_personal_stories": completed and active > 0,
