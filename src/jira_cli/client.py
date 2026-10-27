@@ -40,7 +40,7 @@ class JiraClient:
         path: str,
         *,
         expected: int,
-        body: dict[str, Any] | None = None,
+        body: dict[str, Any] | str | None = None,
         files: dict[str, tuple[str, BinaryIO, str]] | None = None,
     ) -> Any:
         try:

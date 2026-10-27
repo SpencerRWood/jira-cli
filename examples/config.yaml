@@ -11,6 +11,7 @@ defaults:
     assigned_to: me
     status_categories: [new, indeterminate]
 creation:
+  # Applies to Epic creation; Story creation always keeps the existing context.
   set_context_after_create: true
 context:
   persist: true
