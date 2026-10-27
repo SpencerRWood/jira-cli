@@ -106,24 +106,26 @@ class Mutations:
         if "assignee" in fields:
             self.permission("ASSIGN_ISSUES", project=project, issue=issue)
         if fields.get("assignee") is not None:
-            name = fields["assignee"]["name"]
-            target = (
-                {"issueKey": issue_key(issue)}
-                if issue
-                else {"project": project_key(project or "")}
+            self.check_assignable(
+                fields["assignee"]["name"], project=project, issue=issue
             )
-            users = self.client.get(
-                "user/assignable/search", {**target, "username": name}
-            )
-            if not isinstance(users, list) or not any(
-                isinstance(user, dict)
-                and user.get("name") == name
-                and user.get("active") is True
-                for user in users
-            ):
-                raise UserError(
-                    "The selected assignee is not an active assignable user."
-                )
+
+    def check_assignable(
+        self, name: str, *, project: str | None = None, issue: str | None = None
+    ) -> None:
+        target = (
+            {"issueKey": issue_key(issue)}
+            if issue
+            else {"project": project_key(project or "")}
+        )
+        users = self.client.get("user/assignable/search", {**target, "username": name})
+        if not isinstance(users, list) or not any(
+            isinstance(user, dict)
+            and user.get("name") == name
+            and user.get("active") is True
+            for user in users
+        ):
+            raise UserError("The selected assignee is not an active assignable user.")
 
     def create(self, request: Creation) -> dict[str, Any]:
         project = project_key(request.project)
@@ -207,6 +209,19 @@ class Mutations:
             "PUT", "issue/" + issue, expected=204, body={"fields": fields}
         )
         return {"key": issue, "updated_fields": list(fields)}
+
+    def assign_self(self, issue: str) -> dict[str, Any]:
+        issue = issue_key(issue)
+        self.gate("ASSIGN_ISSUES", issue=issue)
+        user = self.client.object("myself")
+        name = user.get("name")
+        if not isinstance(name, str) or not name.strip() or name == "-1":
+            raise UserError("Jira did not return a usable authenticated username.")
+        self.check_assignable(name, issue=issue)
+        self.client.write(
+            "PUT", "issue/" + issue + "/assignee", expected=204, body={"name": name}
+        )
+        return {"key": issue, "url": self.client.url(issue), "assigned_to_self": True}
 
     def set_epic(
         self, issue: str, epic: str | None, *, clear: bool = False

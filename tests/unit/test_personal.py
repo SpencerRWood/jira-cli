@@ -319,7 +319,7 @@ def test_invalid_status_category_fails_without_guessing(status: Any) -> None:
         personal.done(row)
 
 
-@pytest.mark.parametrize("command", ["issue", "epic"])
+@pytest.mark.parametrize("command", ["issue", "story", "epic"])
 def test_explicit_picker_updates_only_local_state(
     network: Network,
     monkeypatch: pytest.MonkeyPatch,
@@ -337,6 +337,10 @@ def test_explicit_picker_updates_only_local_state(
     assert "fixture-pat-never-print" not in output.err + output.out
     assert "\x1b" not in output.err
     assert "\\u001b" in output.err
+    assert "Summary" in output.err
+    assert "Status" in output.err
+    assert "completed_with_active_personal_stories" not in output.err
+    assert '"summary"' not in output.err
     assert ContextStore(application, Config()).selection().issue == "WWRAP-1"
     assert all(r.method == "GET" for r in network[1])
 

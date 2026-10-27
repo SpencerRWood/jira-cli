@@ -277,7 +277,8 @@ the active personal count and completed-Epic marker still refer only to you.
 context work as for issue views. All views and lists are GET-only and leave
 context unchanged. Jira visibility and permissions remain authoritative.
 
-The optional `issue select` and `epic select` menus show numbered choices on stderr
+The optional `issue select`, `story select`, and `epic select` menus show a numbered
+table of keys, summaries, and statuses on stderr, without internal filtering flags,
 and save only the chosen key as local active context. They never update Jira.
 Blank input, interruption, or an invalid number leaves context unchanged. Pickers
 require an interactive terminal, table output, and enabled context persistence;
@@ -372,6 +373,7 @@ jira comment add --file '.\comment.txt' --issue WWRAP-123
 jira attach '.\selected file.txt' '.\another selected file.pdf' --issue WWRAP-123
 jira set status 'In Progress' --issue WWRAP-123 --non-interactive
 jira set field priority High --issue WWRAP-123
+jira assign --issue WWRAP-123
 jira set field description --from-file '.\description.txt' --issue WWRAP-123
 jira set field labels '["review","test"]' --issue WWRAP-123
 jira set epic WWRAP-100 --issue WWRAP-123
@@ -388,6 +390,15 @@ target, with assignment permission. Epic Link uses the field identified by Jira'
 Data Center Epic Link schema, and verifies the selected issue is an accessible Epic;
 there is no hardcoded custom-field number or assumption that a subtask parent is an
 Epic Link.
+
+`jira assign --issue WWRAP-123` assigns that issue to your authenticated Jira
+account. Omit `--issue` to use the active working context. This performs a real
+Jira write after checking assignment permission and that your account is active
+and assignable to the target issue; it leaves local context unchanged. It does
+not require the issue to appear in your default lists. An uncertain write is
+never retried automatically: inspect Jira before retrying. During corporate
+verification, run read-only checks first and only run this command on an
+explicitly authorized test issue.
 
 Creation input is one YAML mapping of metadata field names or IDs to values:
 
