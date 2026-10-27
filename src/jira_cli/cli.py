@@ -10,7 +10,14 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.table import Table
 
-from jira_cli import listing, personal_cli, report_cli, reporting, write_cli
+from jira_cli import (
+    listing,
+    personal_cli,
+    presentation,
+    report_cli,
+    reporting,
+    write_cli,
+)
 from jira_cli.client import JiraClient
 from jira_cli.completion import powershell
 from jira_cli.config import (
@@ -129,8 +136,11 @@ def emit(data: object, args: argparse.Namespace, token: str | None = None) -> No
     if args.format == "json":
         sys.stdout.write(encoded + "\n")
         return
-    table = Table("Field", "Value")
     safe = json.loads(encoded)
+    if args.command in {"issue", "story", "epic"} and args.action == "list":
+        presentation.issue_list(safe, args.command)
+        return
+    table = Table("Field", "Value")
     for key, value in safe.items() if isinstance(safe, dict) else [("result", safe)]:
         table.add_row(str(key), json.dumps(value, ensure_ascii=False))
     Console(markup=False, highlight=False).print(table)
@@ -229,7 +239,7 @@ def issues(
         return {"url": url}
     presenter = IssueViews(client, config)
     issue = presenter.get(key, "Story" if args.command == "story" else None)
-    return presenter.normalize(issue, detail=args.detail)
+    return presenter.normalize(issue, detail=args.detail, include_description=True)
 
 
 def reports(

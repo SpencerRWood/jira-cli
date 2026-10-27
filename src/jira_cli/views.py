@@ -139,7 +139,11 @@ class IssueViews:
         return issue_key(str(matches[0])) if matches else None
 
     def normalize(
-        self, issue: dict[str, Any], *, detail: bool = False
+        self,
+        issue: dict[str, Any],
+        *,
+        detail: bool = False,
+        include_description: bool = False,
     ) -> dict[str, Any]:
         data = self.fields(issue)
         result = {
@@ -152,6 +156,8 @@ class IssueViews:
             "assignee": self.assignee(data.get("assignee")),
             "epic": self.epic(data),
         }
+        if include_description or detail:
+            result["description"] = data.get("description")
         if detail:
             result.update(self.details(data))
         return result
@@ -164,7 +170,6 @@ class IssueViews:
         if not all(isinstance(v, list) for v in [comments, attachments, links]):
             raise UserError("Jira returned invalid issue detail lists.")
         return {
-            "description": data.get("description"),
             "dates": {
                 key: data.get(key)
                 for key in ["created", "updated", "duedate", "resolutiondate"]

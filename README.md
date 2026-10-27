@@ -157,14 +157,25 @@ views do not apply list filters. All three use shared retrieval/normalization an
 the same table/JSON presentation. `epic view` retains grouped child Stories,
 `--mine`, and `--all-stories`; `--detail` is available on all three views.
 
-Default JSON uses `key`, `url`, `summary`, `type`, `priority`, `status`, `assignee`,
-and `epic`. Status/priority are readable names; `epic` is a directly associated
+Default view JSON uses `key`, `url`, `summary`, `description`, `type`, `priority`,
+`status`, `assignee`, and `epic`. Descriptions appear in default Issue, Story, and
+Epic views without `--detail`; lists remain compact.
+
+Terminal `issue list`, `story list`, and `epic list` output uses one issue per
+table row, with Key, Summary, Status, Priority, and Assignee. Issue/Story tables
+also show the Epic key; Epic tables show personal active-Story counts and a
+completed-with-active-Stories warning. Long summaries wrap within the terminal.
+Emails and URLs remain available in `--format json` and individual views rather
+than crowding the list. Empty lists print `No matching issues.`; JSON retains
+its existing array/envelope schema and `--quiet` suppresses terminal output.
+
+Status/priority are readable names; `epic` is a directly associated
 Epic key or null. A priority ID without a name is resolved against Jira's actual
 priority metadata. Unknown names stay null; icon filenames never determine priority.
 Assignees use only Jira `displayName` and, when supplied/permitted, `emailAddress`.
 Simple `Last, First` names become `First Last`; multipart, annotated, or ambiguous
 names stay unchanged. Missing assignees/emails are valid. Avatar/icon objects are
-excluded. Detailed views add whitelisted descriptions, dates, comments, attachments,
+excluded. Detailed views add whitelisted dates, comments, attachments,
 and related issue keys. Raw REST envelopes and the former nested Epic envelope are
 replaced by this normalized schema; scripts should use these field names. Explicit
 `search --jql` still returns the search response issues without changing the JQL.

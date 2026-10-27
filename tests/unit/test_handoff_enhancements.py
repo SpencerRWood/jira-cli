@@ -74,6 +74,8 @@ def test_shared_normalized_views_context_and_type(
     assert result["key"] == key
     assert result["url"].endswith("/browse/" + key)
     assert result["status"] == "In Progress"
+    assert result["description"] == "A fixture description"
+    assert "comments" not in result
     assert result["priority"] == "Expedite"
     assert result["assignee"] == {
         "name": "Jane Smith",
@@ -222,6 +224,7 @@ def test_default_list_filters_and_overrides(
     assert ("statusCategory IN (2, 4)" in jql) == categories
     assert ('issuetype = "Story"' in jql) == (command == "story")
     assert result[0]["status"] == "In Progress"
+    assert "description" not in result[0]
     assert result[0]["assignee"]["name"] == "Jane Smith"
 
 
@@ -392,3 +395,80 @@ def test_unsupported_configuration_fails_safely(
 ) -> None:
     with pytest.raises(UserError):
         set_config(application, key, value)
+
+
+@pytest.mark.parametrize("command", ["issue", "story", "epic"])
+def test_lists_render_rows_and_keep_json_complete(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    setup(network)
+    monkeypatch.setenv("COLUMNS", "150")
+    epic = issue("WWRAP-100", "Epic")
+    epic["fields"].pop(LINK)
+    epic["fields"]["status"] = {"name": "Completed", "statusCategory": {"key": "done"}}
+
+    def search(request: httpx.Request) -> httpx.Response:
+        rows = (
+            [epic] if 'issuetype = "Epic"' in request.url.params["jql"] else [issue()]
+        )
+        return httpx.Response(
+            200, json={"startAt": 0, "total": len(rows), "issues": rows}
+        )
+
+    network[0]["search"] = search
+    assert main([command, "list"]) == 0
+    output = capsys.readouterr().out
+    assert "Summary" in output
+    assert "Priority" in output
+    assert "Jane Smith" in output
+    assert output.count("WWRAP-100" if command == "epic" else "WWRAP-123") == 1
+    assert "fixture.user@example.test" not in output
+    assert "https://" not in output
+    assert '"key":' not in output
+    if command == "epic":
+        assert "Completed; active Stories" in output
+        assert "Filter: relevant" in output
+    result = invoke([command, "list"], capsys)
+    row = result["epics"][0] if command == "epic" else result[0]
+    assert row["assignee"]["email"] == "fixture.user@example.test"
+    assert row["url"].startswith("https://")
+
+
+@pytest.mark.parametrize("command", ["issue", "story", "epic"])
+def test_empty_and_quiet_list_tables(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    setup(network)
+    network[0]["search"] = lambda _: httpx.Response(
+        200, json={"startAt": 0, "total": 0, "issues": []}
+    )
+    assert main([command, "list"]) == 0
+    assert "No matching issues." in capsys.readouterr().out
+    assert main([command, "list", "--quiet"]) == 0
+    assert capsys.readouterr().out == ""
+    result = invoke([command, "list"], capsys)
+    assert (result["epics"] if command == "epic" else result) == []
+
+
+def test_list_table_redacts_tokens_and_escapes_terminal_controls(
+    network: Network,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup(network)
+    monkeypatch.setenv("COLUMNS", "180")
+    row = issue()
+    row["fields"]["summary"] = "fixture-pat-never-print\x1b[31m\nFixture summary"
+    network[0]["search"] = lambda _: httpx.Response(
+        200, json={"startAt": 0, "total": 1, "issues": [row]}
+    )
+    assert main(["story", "list"]) == 0
+    output = capsys.readouterr().out
+    assert "fixture-pat-never-print" not in output
+    assert "REDACTED" in output
+    assert "\x1b" not in output
