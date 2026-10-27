@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from jira_cli import (
+    epic_context,
     listing,
     personal_cli,
     presentation,
@@ -96,6 +97,8 @@ def parser() -> argparse.ArgumentParser:
                 leaf.add_argument("--type", dest="issue_type", default="Story")
             if name in {"issue", "story"}:
                 issue_arguments(leaf, action)
+                if name == "story" and action in {"list", "select"}:
+                    epic_context.flags(leaf)
     for name in ["search", "doctor", "completion"]:
         leaf = commands.add_parser(name)
         common(leaf)
@@ -223,7 +226,13 @@ def issues(
         if args.action == "select":
             personal_cli.require_picker(args)
         presenter = IssueViews(client, config)
-        rows = listing.issues(args, presenter, project)
+        epic = (
+            epic_context.resolve(args, client, store, config)
+            if args.command == "story"
+            else None
+        )
+        epic_context.notice(epic, args)
+        rows = listing.issues(args, presenter, project, epic=epic)
         return (
             personal_cli.select(rows, args, client, store)
             if args.action == "select"
@@ -306,7 +315,11 @@ def run(args: argparse.Namespace) -> None:
         emit(result, args, token.get_secret_value())
         if isinstance(result, dict) and result.get("success") is False:
             raise UserError(
-                "Attachment operation incomplete; inspect results before any retry."
+                str(
+                    result.get("watcher_warning")
+                    or "Attachment operation incomplete; "
+                    "inspect results before any retry."
+                )
             )
     finally:
         client.close()

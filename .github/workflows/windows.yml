@@ -21,6 +21,12 @@ jobs:
       - name: Verify PowerShell arguments without Jira requests
         shell: pwsh
         run: |
+          uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="watcher"; assert args.issue=="WWRAP-123"; assert args.watchers==("alice","bob")' watcher add --issue WWRAP-123 --watchers 'alice, bob'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.epic=="WWRAP-100"' story list --epic WWRAP-100
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.no_epic' create story --summary 'Fixture title' --no-epic
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="assign"; assert args.issue=="WWRAP-123"' assign --issue WWRAP-123
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $description = @'
@@ -30,6 +36,8 @@ jobs:
           $env:JIRA_CLI_TEST_DESCRIPTION = $description
           try {
             foreach ($kind in @('story', 'epic')) {
+              uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.watchers==("alice","bob")' create $kind --watchers 'alice, bob,alice'
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
               uv run --frozen python -c 'import os,sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="create"; assert args.description==os.environ["JIRA_CLI_TEST_DESCRIPTION"]; assert args.summary=="Fixture title"' create $kind --summary 'Fixture title' --description $description --non-interactive
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             }
@@ -60,6 +68,11 @@ jobs:
             'jira --project WWRAP epic list --with' = '--with-my-stories'
             'jira report daily --format c' = 'csv'
             'jira story v' = 'view'
+            'jira story list --ep' = '--epic'
+            'jira create story --no-e' = '--no-epic'
+            'jira create story --wat' = '--watchers'
+            'jira watcher a' = 'add'
+            'jira watcher add --wat' = '--watchers'
             'jira create story --desc' = '--description'
           }
           foreach ($line in $cases.Keys) {

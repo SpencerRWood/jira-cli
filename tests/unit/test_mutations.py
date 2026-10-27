@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from jira_cli.cli import main
-from jira_cli.config import Config, UserError
+from jira_cli.config import Config, UserError, set_config
 from jira_cli.context import ContextStore, Selection
 from jira_cli.metadata import coerce, field_map, find_field, prepare
 
@@ -36,7 +36,9 @@ def test_inline_description_creation_preserves_multiline_and_context(
         r for r in network[1] if r.method == "POST" and r.url.path.endswith("/issue")
     )
     assert json.loads(sent.content)["fields"]["description"] == description
-    assert ContextStore(application, Config()).selection().issue == "WWRAP-100"
+    assert ContextStore(application, Config()).selection().issue == (
+        "WWRAP-100" if kind == "epic" else None
+    )
 
 
 @pytest.fixture
@@ -74,6 +76,8 @@ def write_metadata(
                 "CREATE_ATTACHMENTS",
                 "TRANSITION_ISSUES",
                 "ASSIGN_ISSUES",
+                "MANAGE_WATCHERS",
+                "BROWSE_PROJECTS",
             ]
         }
     }
@@ -117,7 +121,10 @@ def write_metadata(
             }
         ]
     }
-    routes["user/assignable/search"] = [{"name": "bob", "active": True}]
+    routes["user/assignable/search"] = [
+        {"name": "bob", "active": True},
+        {"name": "fixture-user", "active": True},
+    ]
     routes["attachment/meta"] = {"enabled": True, "uploadLimit": 10000}
     routes["POST issue"] = httpx.Response(201, json={"id": "100", "key": "WWRAP-100"})
     routes["PUT issue/WWRAP-1"] = httpx.Response(204)
@@ -129,6 +136,345 @@ def write_metadata(
 
 def writes(network: tuple[dict[str, Any], list[httpx.Request]]) -> list[httpx.Request]:
     return [r for r in network[1] if r.method != "GET"]
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_existing_issue_watchers_use_key_or_context_without_creation(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    explicit: bool,
+) -> None:
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-200"))
+    before = (application / "state.json").read_bytes()
+    key = "WWRAP-1" if explicit else "WWRAP-200"
+    network[0][f"POST issue/{key}/watchers"] = httpx.Response(204)
+    args = ["watcher", "add", "--watchers", "alice, bob,alice", "--format", "json"]
+    if explicit:
+        args.extend(["--issue", key])
+    assert main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["key"] == key
+    assert result["success"] is True
+    assert len(writes(network)) == 2
+    assert [json.loads(r.content) for r in writes(network)] == ["alice", "bob"]
+    assert all(r.url.path.endswith(f"/issue/{key}/watchers") for r in writes(network))
+    permissions = [r for r in network[1] if r.url.path.endswith("/mypermissions")]
+    assert all(r.url.params["issueKey"] == key for r in permissions)
+    assert (application / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+def test_existing_watcher_failure_identifies_target_without_creation_claim(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    capsys: pytest.CaptureFixture[str],
+    quiet: bool,
+) -> None:
+    network[0]["POST issue/WWRAP-1/watchers"] = httpx.ReadTimeout(
+        "fixture-pat-never-print"
+    )
+    args = [
+        "watcher",
+        "add",
+        "--issue",
+        "WWRAP-1",
+        "--watchers",
+        "alice,bob",
+        "--format",
+        "json",
+    ]
+    if quiet:
+        args.append("--quiet")
+    assert main(args) == 1
+    output = capsys.readouterr()
+    assert "WWRAP-1" in output.err
+    assert "was created" not in output.err
+    assert "fixture-pat-never-print" not in output.err + output.out
+    assert len(writes(network)) == 1
+    if quiet:
+        assert output.out == ""
+    else:
+        result = json.loads(output.out)
+        assert [r["status"] for r in result["watchers"]] == [
+            "uncertain",
+            "not_attempted",
+        ]
+
+
+@pytest.mark.parametrize("permission", ["BROWSE_PROJECTS", "MANAGE_WATCHERS"])
+def test_existing_watcher_denied_permission_never_writes(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    permission: str,
+) -> None:
+    network[0]["mypermissions"]["permissions"][permission]["havePermission"] = False
+    assert main(["watcher", "add", "--issue", "WWRAP-1", "--watchers", "alice"]) == 1
+    assert not writes(network)
+
+
+def test_existing_watcher_requires_key_context_and_nonempty_names(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+) -> None:
+    assert main(["watcher", "add", "--watchers", "alice"]) == 1
+    with pytest.raises(SystemExit):
+        main(["watcher", "add", "--issue", "WWRAP-1"])
+    with pytest.raises(SystemExit):
+        main(["watcher", "add", "--issue", "WWRAP-1", "--watchers", "alice,"])
+    assert network[1] == []
+
+
+@pytest.mark.parametrize("kind", ["story", "epic"])
+def test_creation_adds_comma_delimited_watchers_after_confirmed_key(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+) -> None:
+    network[0]["POST issue/WWRAP-100/watchers"] = httpx.Response(204)
+    args = [
+        "create",
+        kind,
+        "--summary",
+        "Fixture",
+        "--watchers",
+        "alice, bob,alice,ALICE",
+        "--format",
+        "json",
+    ]
+    if kind == "epic":
+        args.extend(["--field", "Epic Name=Fixture"])
+    assert main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["success"] is True
+    assert result["watchers"] == [
+        {"username": "alice", "status": "added"},
+        {"username": "bob", "status": "added"},
+    ]
+    sent = writes(network)
+    assert len(sent) == 3
+    assert sent[0].url.path.endswith("/issue")
+    assert [json.loads(r.content) for r in sent[1:]] == ["alice", "bob"]
+    assert all(r.url.path.endswith("/WWRAP-100/watchers") for r in sent[1:])
+    assert "watchers" not in json.loads(sent[0].content)["fields"]
+    assert ContextStore(application, Config()).selection().issue == (
+        "WWRAP-100" if kind == "epic" else None
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["", " ", ",alice", "alice,", "alice,,bob", "ali\nce", "alice\x1b[31m"]
+)
+def test_invalid_watcher_list_fails_before_network(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    value: str,
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["create", "story", "--summary", "Fixture", "--watchers", value])
+    assert error.value.code == 2
+    assert network[1] == []
+
+
+def test_watcher_permission_denied_prevents_creation(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+) -> None:
+    network[0]["mypermissions"]["permissions"]["MANAGE_WATCHERS"]["havePermission"] = (
+        False
+    )
+    assert main(["create", "story", "--summary", "Fixture", "--watchers", "alice"]) == 1
+    assert not writes(network)
+
+
+def test_self_watching_does_not_require_manage_watchers(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+) -> None:
+    network[0]["mypermissions"]["permissions"]["MANAGE_WATCHERS"]["havePermission"] = (
+        False
+    )
+    network[0]["POST issue/WWRAP-100/watchers"] = httpx.Response(204)
+    assert (
+        main(["create", "story", "--summary", "Fixture", "--watchers", "fixture-user"])
+        == 0
+    )
+    assert len(writes(network)) == 2
+
+
+@pytest.mark.parametrize("failure", ["rejected", "timeout", "server"])
+def test_partial_watcher_failure_reports_created_issue_and_stops(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    def watch(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content) == "alice":
+            return httpx.Response(204)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("fixture-pat-never-print")
+        return httpx.Response(
+            500 if failure == "server" else 403, text="fixture-pat-never-print"
+        )
+
+    network[0]["POST issue/WWRAP-100/watchers"] = watch
+    assert (
+        main(
+            [
+                "create",
+                "story",
+                "--summary",
+                "Fixture",
+                "--watchers",
+                "alice,bob,charlie",
+                "--format",
+                "json",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["key"] == "WWRAP-100"
+    assert result["context_updated"] is False
+    assert result["success"] is False
+    assert [row["status"] for row in result["watchers"]] == [
+        "added",
+        "failed" if failure == "rejected" else "uncertain",
+        "not_attempted",
+    ]
+    assert len(writes(network)) == 3
+    assert "WWRAP-100 was created" in output.err
+    assert "Do not create it again" in output.err
+    assert "fixture-pat-never-print" not in output.out + output.err
+
+
+def test_no_watchers_sent_for_uncertain_creation(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+) -> None:
+    network[0]["POST issue"] = httpx.ReadTimeout("fixture")
+    assert main(["create", "story", "--summary", "Fixture", "--watchers", "alice"]) == 1
+    assert len(writes(network)) == 1
+
+
+@pytest.mark.parametrize("active", [None, "WWRAP-1", "WWRAP-200"])
+def test_story_defaults_to_self_and_never_changes_context(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    active: str | None,
+) -> None:
+    store = ContextStore(application, Config())
+    if active:
+        store.update(Selection(issue=active))
+    state = application / "state.json"
+    before = state.read_bytes() if state.exists() else None
+    assert main(["create", "story", "--summary", "Fixture", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["context_updated"] is False
+    fields = json.loads(writes(network)[0].content)["fields"]
+    assert fields["assignee"] == {"name": "fixture-user"}
+    assert (state.read_bytes() if state.exists() else None) == before
+
+
+@pytest.mark.parametrize("source", ["flag", "field", "yaml"])
+def test_explicit_story_assignee_overrides_self_default(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    source: str,
+) -> None:
+    options = ["--assignee", "bob"]
+    if source == "field":
+        options = ["--field", "Assignee=bob"]
+    if source == "yaml":
+        path = application / "fixture.yaml"
+        path.write_text("assignee: bob\n", encoding="utf-8")
+        options = ["--from", str(path)]
+    network[0]["myself"] = {}  # An explicit assignee does not need current-user lookup.
+    assert main(["create", "story", "--summary", "Fixture", *options]) == 0
+    assert json.loads(writes(network)[0].content)["fields"]["assignee"] == {
+        "name": "bob"
+    }
+
+
+@pytest.mark.parametrize(
+    "failure", ["identity", "permission", "assignable", "metadata"]
+)
+def test_default_story_assignment_failure_prevents_creation(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    write_metadata: dict[str, Any],
+    failure: str,
+) -> None:
+    routes, _ = network
+    if failure == "identity":
+        routes["myself"] = {}
+    elif failure == "permission":
+        routes["mypermissions"]["permissions"]["ASSIGN_ISSUES"]["havePermission"] = (
+            False
+        )
+    elif failure == "assignable":
+        routes["user/assignable/search"] = []
+    else:
+        del write_metadata["assignee"]
+        metadata = routes["issue/createmeta/WWRAP/issuetypes/10001"]
+        metadata["values"] = [
+            r for r in metadata["values"] if r["fieldId"] != "assignee"
+        ]
+    assert main(["create", "story", "--summary", "Fixture"]) == 1
+    assert not writes(network)
+
+
+def test_create_story_inherits_epic_and_keeps_context_for_repeated_creation(
+    application: Path,
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-200"))
+    before = (application / "state.json").read_bytes()
+    for _ in range(2):
+        assert (
+            main(["create", "story", "--summary", "Fixture", "--non-interactive"]) == 0
+        )
+        output = capsys.readouterr()
+        assert "Epic context: WWRAP-200" in output.err
+    sent = writes(network)
+    assert len(sent) == 2
+    assert all(
+        json.loads(r.content)["fields"]["customfield_12900"] == "WWRAP-200"
+        for r in sent
+    )
+    assert (application / "state.json").read_bytes() == before
+
+
+def test_epic_context_creation_uses_epic_project_and_no_context_is_preserved(
+    application: Path,
+    network: tuple[dict[str, Any], list[httpx.Request]],
+) -> None:
+    set_config(application, "defaults.project", "OTHER")
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-200"), global_scope=True)
+    before = (application / "state.json").read_bytes()
+    assert main(["create", "story", "--summary", "Fixture", "--no-context"]) == 0
+    assert json.loads(writes(network)[0].content)["fields"]["project"] == {
+        "key": "WWRAP"
+    }
+    assert (application / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("options", [["--no-epic"], ["--epic", "WWRAP-300"]])
+def test_create_story_can_bypass_or_override_epic_context(
+    application: Path,
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    options: list[str],
+) -> None:
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-200"))
+    network[0]["issue/WWRAP-300"] = {
+        "key": "WWRAP-300",
+        "fields": {"issuetype": {"name": "Epic"}},
+    }
+    assert main(["create", "story", "--summary", "Fixture", *options]) == 0
+    values = json.loads(writes(network)[0].content)["fields"]
+    assert values.get("customfield_12900") == (
+        "WWRAP-300" if "--epic" in options else None
+    )
+    assert store.selection().issue == "WWRAP-200"
 
 
 @pytest.mark.parametrize("use_context", [False, True])
@@ -220,7 +566,7 @@ def test_creation_uses_server_key_metadata_and_confirmed_context(
     assert data == {
         "key": "WWRAP-100",
         "url": "https://jira.example.test/jira/browse/WWRAP-100",
-        "context_updated": True,
+        "context_updated": False,
     }
     fields = json.loads(writes(network)[0].content)["fields"]
     assert fields["project"] == {"key": "WWRAP"}
@@ -229,7 +575,7 @@ def test_creation_uses_server_key_metadata_and_confirmed_context(
     assert fields["assignee"] == {"name": "bob"}
     assert fields["customfield_12900"] == "WWRAP-200"
     assert "key" not in fields
-    assert ContextStore(application, Config()).issue(None) == "WWRAP-100"
+    assert ContextStore(application, Config()).selection().issue is None
 
 
 def test_epic_creation_requires_its_custom_name(
@@ -314,7 +660,21 @@ def test_creation_returns_confirmed_key_if_local_save_fails(
         raise OSError("fixture-pat-never-print")
 
     monkeypatch.setattr(ContextStore, "update", fail)
-    assert main(["create", "story", "--summary", "Confirmed", "--format", "json"]) == 0
+    assert (
+        main(
+            [
+                "create",
+                "epic",
+                "--summary",
+                "Confirmed",
+                "--field",
+                "Epic Name=Fixture",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     output = capsys.readouterr().out
     assert json.loads(output)["key"] == "WWRAP-100"
     assert "Do not create it again" in output

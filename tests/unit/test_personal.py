@@ -79,6 +79,27 @@ def setup(
     routes["search"] = search
 
 
+@pytest.mark.parametrize("options", [[], ["--mine"]])
+def test_assigned_unresolved_epic_without_children_is_included(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    options: list[str],
+) -> None:
+    unresolved = issue("WWRAP-1", kind="Epic", category="done")
+    unresolved["fields"]["resolution"] = None
+    resolved = issue("WWRAP-2", kind="Epic", category="done")
+    resolved["fields"]["resolution"] = {"name": "Done"}
+    other = issue("WWRAP-3", kind="Epic", category="done", assignee="other")
+    other["fields"]["resolution"] = None
+    setup(network, [unresolved, resolved, other, unresolved], [])
+    result = invoke(["epic", "list", *options], capsys)
+    assert [row["key"] for row in result["epics"]] == ["WWRAP-1"]
+    query = next(
+        r for r in network[1] if 'issuetype = "Epic"' in r.url.params.get("jql", "")
+    )
+    assert "resolution" in query.url.params["fields"]
+
+
 def invoke(args: list[str], capsys: pytest.CaptureFixture[str]) -> Any:
     assert main([*args, "--format", "json"]) == 0
     output = capsys.readouterr()

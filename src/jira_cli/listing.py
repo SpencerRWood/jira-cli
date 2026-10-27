@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Sequence
 from typing import Any
 
+from jira_cli import personal
 from jira_cli.client import JiraClient
 from jira_cli.config import UserError, project_key
 from jira_cli.views import IssueViews
@@ -44,10 +45,19 @@ def category_clause(client: JiraClient, keys: Sequence[str]) -> str:
 
 
 def issues(
-    args: argparse.Namespace, presenter: IssueViews, project: str
+    args: argparse.Namespace,
+    presenter: IssueViews,
+    project: str,
+    *,
+    epic: str | None = None,
 ) -> list[dict[str, Any]]:
     client, config = presenter.client, presenter.config
-    clauses = [f'project = "{project_key(project)}"']
+    clauses = (
+        [f'project = "{project_key(project)}"'] if not epic or args.project else []
+    )
+    if epic:
+        _, link = personal.epic_link(client)
+        clauses.append(f'{link} = "{epic}"')
     if args.command == "story":
         clauses.append('issuetype = "Story"')
     if args.mine or (not args.all and config.defaults.filters.assigned_to == "me"):

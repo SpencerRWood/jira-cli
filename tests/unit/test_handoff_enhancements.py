@@ -58,6 +58,138 @@ def invoke(arguments: list[str], capsys: pytest.CaptureFixture[str]) -> Any:
     return json.loads(output.out)
 
 
+@pytest.mark.parametrize("options", [[], ["--all"], ["--include-done"]])
+def test_story_list_scopes_to_active_epic_with_notice(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: list[str],
+) -> None:
+    setup(network)
+    store = ContextStore(application, load_config(application))
+    store.update(Selection(issue="WWRAP-100"))
+    before = (application / "state.json").read_bytes()
+    assert main(["story", "list", *options]) == 0
+    output = capsys.readouterr()
+    assert "Epic context: WWRAP-100" in output.err
+    jql = next(
+        r.url.params["jql"] for r in network[1] if r.url.path.endswith("/search")
+    )
+    assert 'cf[23456] = "WWRAP-100"' in jql
+    assert 'issuetype = "Story"' in jql
+    assert ("assignee = currentUser()" in jql) == ("--all" not in options)
+    assert (application / "state.json").read_bytes() == before
+    assert all(r.method == "GET" for r in network[1])
+
+
+@pytest.mark.parametrize("options", [["--no-epic"], ["--epic", "WWRAP-200"]])
+def test_story_scope_overrides(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: list[str],
+) -> None:
+    setup(network)
+    network[0]["issue/WWRAP-200"] = issue("WWRAP-200", "Epic")
+    store = ContextStore(application, load_config(application))
+    store.update(Selection(issue="WWRAP-100"))
+    assert main(["story", "list", *options, "--project", "OTHER"]) == 0
+    output = capsys.readouterr()
+    jql = next(
+        r.url.params["jql"] for r in network[1] if r.url.path.endswith("/search")
+    )
+    assert 'project = "OTHER"' in jql
+    assert "WWRAP-100" not in jql
+    if "--no-epic" in options:
+        assert "cf[" not in jql
+        assert output.err == ""
+        assert not any(r.url.path.endswith("/issue/WWRAP-100") for r in network[1])
+    else:
+        assert 'cf[23456] = "WWRAP-200"' in jql
+        assert "Epic override: WWRAP-200" in output.err
+    assert store.selection().issue == "WWRAP-100"
+
+
+@pytest.mark.parametrize("options", [["--format", "json"], ["--quiet"]])
+def test_epic_context_preserves_script_output(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: list[str],
+) -> None:
+    setup(network)
+    ContextStore(application, load_config(application)).update(
+        Selection(issue="WWRAP-100")
+    )
+    assert main(["story", "list", *options]) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    if "--quiet" in options:
+        assert output.out == ""
+    else:
+        assert isinstance(json.loads(output.out), list)
+
+
+def test_story_context_is_not_an_epic_and_explicit_search_is_unmodified(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup(network)
+    store = ContextStore(application, load_config(application))
+    store.update(Selection(issue="WWRAP-123"))
+    invoke(["story", "list"], capsys)
+    jql = next(
+        r.url.params["jql"] for r in network[1] if r.url.path.endswith("/search")
+    )
+    assert "cf[" not in jql
+    network[1].clear()
+    store.update(Selection(issue="WWRAP-100"))
+    invoke(["search", "--jql", 'project = "OTHER"'], capsys)
+    assert network[1][0].url.params["jql"] == 'project = "OTHER"'
+    assert len(network[1]) == 1
+
+
+def test_inaccessible_epic_context_does_not_broaden_listing(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup(network)
+    ContextStore(application, load_config(application)).update(
+        Selection(issue="WWRAP-999")
+    )
+    assert main(["story", "list"]) == 1
+    assert "inaccessible" in capsys.readouterr().err
+    assert not any(r.url.path.endswith("/search") for r in network[1])
+    assert main(["story", "list", "--epic", "WWRAP-123"]) == 1
+    assert "not a Epic" in capsys.readouterr().err
+
+
+def test_global_epic_context_ignores_unrelated_default_project(
+    network: Network,
+    application: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup(network)
+    set_config(application, "defaults.project", "OTHER")
+    store = ContextStore(application, load_config(application))
+    store.update(Selection(issue="WWRAP-100"), global_scope=True)
+    invoke(["story", "list"], capsys)
+    jql = next(
+        r.url.params["jql"] for r in network[1] if r.url.path.endswith("/search")
+    )
+    assert 'cf[23456] = "WWRAP-100"' in jql
+    assert "project =" not in jql
+
+
+@pytest.mark.parametrize("command", [["story", "list"], ["create", "story"]])
+def test_epic_override_and_bypass_are_mutually_exclusive(command: list[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        parser().parse_args([*command, "--epic", "WWRAP-100", "--no-epic"])
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize("command", ["issue", "story", "epic"])
 def test_shared_normalized_views_context_and_type(
     network: Network,

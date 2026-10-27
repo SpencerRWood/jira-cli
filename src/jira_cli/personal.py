@@ -93,7 +93,7 @@ def epic_list(
         raise UserError("Jira current user identity is unavailable.")
     epics = client.search(
         f'project = "{project_key(project)}" AND issuetype = "Epic" ORDER BY key ASC',
-        FIELDS,
+        FIELDS + ",resolution",
     )
     result: dict[str, dict[str, Any]] = {}
     for epic in epics:
@@ -103,7 +103,11 @@ def epic_list(
         mine = (
             isinstance(assignee, dict)
             and assignee.get("name") == user["name"]
-            and (include_done or not completed)
+            and (
+                include_done
+                or not completed
+                or ("resolution" in data and data["resolution"] is None)
+            )
         )
         count = counts[epic["key"]]
         include = {

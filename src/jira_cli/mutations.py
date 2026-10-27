@@ -26,6 +26,7 @@ class Creation:
     values: dict[str, Any]
     epic: str | None = None
     update_context: bool = True
+    watchers: tuple[str, ...] = ()
 
 
 class Mutations:
@@ -130,6 +131,8 @@ class Mutations:
     def create(self, request: Creation) -> dict[str, Any]:
         project = project_key(request.project)
         self.gate("CREATE_ISSUES", project=project)
+        if request.watchers:
+            self.check_watchers(request.watchers, project=project)
         metadata = self.client.fields(project, request.kind)
         specs = {
             key: spec
@@ -137,6 +140,10 @@ class Mutations:
             if key not in {"project", "issuetype", "id", "key"}
         }
         values = dict(request.values)
+        if request.kind == "Story" and not any(
+            find_field(name, specs) == "assignee" for name in values
+        ):
+            values["assignee"] = self.current_username()
         if request.epic:
             key = epic_field(specs)
             if key in values:
@@ -151,6 +158,7 @@ class Mutations:
         # turn a successful server write into an accidental blind retry.
         should_update = (
             request.update_context
+            and request.kind != "Story"
             and self.config.creation.set_context_after_create
             and self.config.context.persist
         )
@@ -188,7 +196,74 @@ class Mutations:
                     "Issue was created, but local context could not be saved. "
                     "Do not create it again."
                 )
+        if request.watchers:
+            response.update(self.watcher_result(key, request.watchers, created=True))
         return response
+
+    def check_watchers(
+        self,
+        names: tuple[str, ...],
+        *,
+        project: str | None = None,
+        issue: str | None = None,
+    ) -> None:
+        current_user = self.current_username()
+        if any(name.casefold() != current_user.casefold() for name in names):
+            self.permission("MANAGE_WATCHERS", project=project, issue=issue)
+
+    def watch_existing(self, issue: str, names: tuple[str, ...]) -> dict[str, Any]:
+        issue = issue_key(issue)
+        self.gate("BROWSE_PROJECTS", issue=issue)
+        self.check_watchers(names, issue=issue)
+        return {
+            "key": issue,
+            "url": self.client.url(issue),
+            **self.watcher_result(issue, names, created=False),
+        }
+
+    def watcher_result(
+        self, issue: str, names: tuple[str, ...], *, created: bool
+    ) -> dict[str, Any]:
+        rows = self.add_watchers(issue, names)
+        result: dict[str, Any] = {
+            "watchers": rows,
+            "success": all(row["status"] == "added" for row in rows),
+        }
+        if not result["success"]:
+            result["watcher_warning"] = (
+                (
+                    f"Issue {issue} was created, but watcher updates are incomplete. "
+                    "Do not create it again; "
+                    if created
+                    else f"Watcher updates for issue {issue} are incomplete. "
+                )
+                + "Inspect Jira and add remaining watchers to this existing issue. "
+                "No automatic retry was sent."
+            )
+        return result
+
+    def add_watchers(self, issue: str, names: tuple[str, ...]) -> list[dict[str, str]]:
+        results: list[dict[str, str]] = []
+        stopped = False
+        for name in names:
+            entry = {"username": name, "status": "not_attempted"}
+            if not stopped:
+                try:
+                    self.client.write(
+                        "POST",
+                        "issue/" + issue_key(issue) + "/watchers",
+                        expected=204,
+                        body=name,
+                    )
+                    entry["status"] = "added"
+                except WriteUncertainError as exc:
+                    stopped = True
+                    entry.update(status="uncertain", error=str(exc))
+                except UserError as exc:
+                    stopped = True
+                    entry.update(status="failed", error=str(exc))
+            results.append(entry)
+        return results
 
     def set_field(self, issue: str, name: str | None, value: object) -> dict[str, Any]:
         issue = issue_key(issue)
@@ -210,13 +285,17 @@ class Mutations:
         )
         return {"key": issue, "updated_fields": list(fields)}
 
-    def assign_self(self, issue: str) -> dict[str, Any]:
-        issue = issue_key(issue)
-        self.gate("ASSIGN_ISSUES", issue=issue)
+    def current_username(self) -> str:
         user = self.client.object("myself")
         name = user.get("name")
         if not isinstance(name, str) or not name.strip() or name == "-1":
             raise UserError("Jira did not return a usable authenticated username.")
+        return name
+
+    def assign_self(self, issue: str) -> dict[str, Any]:
+        issue = issue_key(issue)
+        self.gate("ASSIGN_ISSUES", issue=issue)
+        name = self.current_username()
         self.check_assignable(name, issue=issue)
         self.client.write(
             "PUT", "issue/" + issue + "/assignee", expected=204, body={"name": name}

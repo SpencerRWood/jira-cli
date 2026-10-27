@@ -69,6 +69,22 @@ Epic with your active Story. The latter two must remain relevant, with no duplic
 and with the completed-Epic marker/counts visible. Do not change live assignees or
 statuses merely to manufacture test cases.
 
+An assigned Epic with an empty resolution should also appear, even without active
+child Stories or with a Done status category. The selected project still applies.
+Set an existing Epic as local context and verify Story scoping read-only:
+
+```powershell
+jira context set WWRAP-100
+jira story list
+jira story list --all
+jira story list --no-epic
+jira context show
+```
+
+Scoped table output should start with `Epic context: WWRAP-100`. Compare the listed
+Stories' Epic Link in Jira; `--all` retains the Epic scope, while `--no-epic`
+uses the normal project list. JSON and quiet output omit the notice.
+
 Optionally use `story select` / `epic select` in an interactive terminal. They
 change only local active context. Story selection defaults to your unresolved
 active Stories; Epic selection uses relevance. Blank input must leave context
@@ -97,11 +113,28 @@ jira create story --project WWRAP --summary 'Authorized CLI description test' --
 ```
 
 Inspect the returned server-assigned key in Jira and compare the full description,
-including line breaks. `--no-context` avoids changing local selection during this
-controlled test. Separately authorized Epic testing uses `create epic` with the
+including line breaks. Confirm the default assignee is your authenticated Jira
+account and that `jira context show` remains unchanged. Story creation always
+preserves context; `--no-context` remains valid but is unnecessary for Stories.
+If an Epic is active, confirm the new Story's Epic Link matches it. Use an explicit
+`--assignee` only when authorized to test that override.
+Separately authorized Epic testing uses `create epic` with the
 same description options and all metadata-required fields (such as Epic Name).
-The default context-after-confirmed-creation behavior is unchanged and covered by
-automated tests. Retain the existing description-file path as an alternative.
+Epic context-after-confirmed-creation behavior is unchanged. Retain the existing
+description-file path as an alternative.
+
+Only with separate authorization for test-issue creation and watcher changes,
+add `--watchers 'username1,username2'` using approved test accounts. Verify the
+watcher list in Jira and confirm the CLI reports each requested user as `added`.
+Do not manufacture permission failures on live issues. If the issue was created
+but watcher updates fail, retain its returned key and inspect that issue; do not
+rerun creation. Watcher permissions, global watching settings, and user access
+require corporate validation independently of mocked test results.
+
+For a separately authorized watcher-only test on an existing issue, use
+`jira watcher add --issue WWRAP-123 --watchers 'username1,username2'`. Confirm in
+Jira that the specified users watch that existing issue, no issue was created,
+and local context is unchanged. Omitting `--issue` targets active context.
 
 If a write outcome is uncertain, inspect Jira before any manual retry. Do not run
 automatic writes, bulk updates, or test-issue cleanup scripts.

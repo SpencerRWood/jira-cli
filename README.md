@@ -222,12 +222,45 @@ default (`resolution IS EMPTY`); `--all` or `--include-done` removes that restri
 They use the existing local context picker, with no Jira writes. My Today keeps
 its own unresolved/current-user semantics and cross-project default.
 
+When your active issue is an Epic, `story list`, `story select`, and `create story`
+automatically use it as the parent Epic. Table output starts with
+`Epic context: WWRAP-100 — Stories scoped to this Epic.` Set it with
+`jira context set WWRAP-100` or `jira epic select`. Story lists still apply your
+assigned/active defaults; `--all` broadens those filters while retaining the Epic
+scope. Without an explicit `--project`, the Epic determines the scope rather than
+the configured default project (creation uses the Epic's project). An explicit
+`--project` remains authoritative.
+
+```powershell
+jira context set WWRAP-100
+jira story list
+jira story list --all
+jira create story --summary 'Fixture summary' --description 'Fixture details'
+jira story list --epic WWRAP-200
+jira story list --no-epic
+jira create story --summary 'Standalone story' --no-epic
+```
+
+Automatically scoped creation keeps the Epic context, so repeated creations stay
+under it. `--epic KEY` overrides the parent for a command; `--no-epic` bypasses the
+Epic context. Those two options conflict. Story creation always leaves existing
+context unchanged, including explicit overrides/bypasses. To supply Epic Link through `--field` or an
+input file while an Epic is active, also use `--no-epic` to avoid supplying two
+parents. Picking a Story explicitly changes active context to that Story.
+Non-Epic context does not constrain Story lists or creation. Inaccessible context
+or missing issue type fails clearly; use `--no-epic` to bypass it deliberately.
+Generic Issue commands, explicit issue views, and supplied JQL remain unchanged.
+The notice is omitted for JSON and quiet output, preserving scripting formats.
+
 Epic listing/selection stays separate: relevant Epics are the deduplicated union
 of assigned open Epics and Epics with active personal Stories, including completed
 Epics from the second rule. General list defaults never add a blanket assignee
 filter to Epics. Existing `--mine`, `--with-my-stories`, `--all`, and `--project`
 remain; Epic `--include-done` broadens only the assigned-Epic rule, without counting
 completed child Stories as active. The existing `epics` YAML section is unchanged.
+Assigned Epics with an empty Jira resolution are included even when their status
+category is Done and they have no active children. The selected project and
+configured relevant-filter switches still apply.
 
 See the [Windows handoff verification guide](docs/windows-handoff-testing.md) for
 read-first corporate checks, filter comparisons, and separately authorized inline
@@ -269,6 +302,9 @@ The `epics.include_*` YAML switches customize the default relevant filter; expli
 filter flags override them. Epic Link is discovered by its Data Center field
 schema, never by a fixed custom field number or display name. Missing or ambiguous
 metadata fails clearly.
+Here, assigned open Epics also include unresolved Epics regardless of status
+category. Resolved Done Epics require active personal Stories or an explicit
+`--include-done`/`--all` selection.
 
 `epic view` shows Epic metadata and your child Stories grouped by status and
 priority, including completed Stories. `--all-stories` includes other assignees;
@@ -428,9 +464,52 @@ Missing required creation/transition values, field choices, and epic keys prompt
 only in an interactive terminal. `--non-interactive` and redirected stdin fail
 instead of prompting. Prompts go to stderr to preserve JSON stdout.
 
-Successful creation returns the server-assigned key and its URL, and then updates
-active context by default. `--no-context`, `creation.set_context_after_create=false`,
-or `context.persist=false` disables that update. Failed or uncertain creation never
+Story creation assigns the authenticated Jira user by default, after checking
+assignment permissions and assignability. An explicit assignee from `--assignee`,
+`--field`, or input YAML takes precedence. Missing identity, unavailable assignment
+metadata, or denied assignment fails before creating anything; the CLI does not
+silently leave the Story unassigned. Story creation returns the server-assigned key
+and URL and never changes active context. Use `jira context set KEY` or a picker
+when you want to switch to the new Story.
+
+Both creation commands accept comma-separated Jira usernames as watchers:
+
+```powershell
+jira create story --summary 'Fixture summary' --description 'Fixture details' --watchers 'alice,bob'
+jira create epic --summary 'Fixture Epic' --field 'Epic Name=Fixture Epic' --watchers 'alice, bob'
+```
+
+Quote the list in PowerShell. Spaces around names are trimmed; duplicates are
+removed while preserving order. Empty entries and control characters are rejected.
+These are usernames, not display names or email addresses. The CLI checks the
+Manage Watchers permission before creation when adding other users; self-watching
+does not require that permission. Jira must have watching enabled and permit the
+requested users to watch the issue.
+
+Watchers use Jira's separate [Add watcher API](https://docs.atlassian.com/software/jira/docs/api/REST/8.14.0/#api/2/issue-addWatcher),
+after the issue key is confirmed. If an addition fails or is uncertain, the CLI
+stops adding watchers, exits with code 1, and returns the created key/URL plus each
+watcher's `added`, `failed`, `uncertain`, or `not_attempted` result. Inspect that
+existing issue and add remaining watchers there; do not rerun creation. There is
+no automatic retry or rollback. Without `--watchers`, no watcher request is made.
+
+To add watchers to an existing issue of any type without creating anything:
+
+```powershell
+jira watcher add --issue WWRAP-123 --watchers 'alice,bob'
+jira watcher add --watchers 'alice,bob' # Uses your active issue context
+```
+
+This leaves context unchanged and uses the same username parsing, permission
+checks, per-user results, and single-attempt behavior as creation. It requires
+access to the target issue; adding other users also requires Manage Watchers.
+After a partial failure, inspect Jira and retry only remaining additions against
+the existing issue, rather than creating a replacement.
+
+Epic creation retains its existing context-update behavior:
+`--no-context`, `creation.set_context_after_create=false`, or `context.persist=false`
+disables that update. These settings do not enable context updates for Stories.
+Failed or uncertain creation never
 changes selection. If creation is confirmed but saving local context fails, the
 confirmed key is still returned with a warning; do not create it again.
 

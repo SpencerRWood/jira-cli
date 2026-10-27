@@ -9,12 +9,13 @@ from typing import Any
 
 import yaml
 
+from jira_cli import epic_context
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError
 from jira_cli.context import ContextStore
 from jira_cli.mutations import MISSING, Creation, Mutations
 
-COMMANDS = {"create", "comment", "attach", "set", "assign"}
+COMMANDS = {"create", "comment", "attach", "set", "assign", "watcher"}
 
 
 def add_parsers(
@@ -24,6 +25,7 @@ def add_parsers(
     for name, actions in {
         "create": ["story", "epic"],
         "comment": ["add"],
+        "watcher": ["add"],
         "set": ["status", "field", "epic"],
     }.items():
         group = commands.add_parser(name)
@@ -33,14 +35,26 @@ def add_parsers(
             leaf = sub.add_parser(action)
             flags(leaf)
             if name == "create":
-                for option in ["summary", "priority", "assignee", "epic"]:
+                for option in ["summary", "priority", "assignee"]:
                     leaf.add_argument("--" + option)
+                if action == "story":
+                    epic_context.flags(leaf)
+                else:
+                    leaf.add_argument("--epic")
                 description = leaf.add_mutually_exclusive_group()
                 description.add_argument("--description")
                 description.add_argument("--description-file", type=Path)
                 leaf.add_argument("--from", dest="input_file", type=Path)
                 leaf.add_argument("--field", action="append", default=[])
                 leaf.add_argument("--no-context", action="store_true")
+                leaf.add_argument(
+                    "--watchers",
+                    type=watcher_names,
+                    default=(),
+                    help="Comma-separated Jira usernames to add as watchers.",
+                )
+            elif name == "watcher":
+                leaf.add_argument("--watchers", type=watcher_names, required=True)
             elif name == "comment":
                 leaf.add_argument("text", nargs="?")
                 leaf.add_argument("--file", type=Path)
@@ -60,6 +74,21 @@ def add_parsers(
     attach.add_argument("files", nargs="+", type=Path)
     assign = commands.add_parser("assign", help="Assign an issue to yourself.")
     flags(assign)
+
+
+def watcher_names(value: str) -> tuple[str, ...]:
+    names = [name.strip() for name in value.split(",")]
+    if any(not name for name in names) or any(
+        ord(char) < 32 or ord(char) == 127 for char in value
+    ):
+        raise argparse.ArgumentTypeError(
+            "Use non-empty, comma-separated usernames without control characters."
+        )
+    # Jira usernames are case-insensitive; preserve the first supplied spelling.
+    unique: dict[str, str] = {}
+    for name in names:
+        unique.setdefault(name.casefold(), name)
+    return tuple(unique.values())
 
 
 def assignments(items: list[str]) -> dict[str, Any]:
@@ -144,13 +173,23 @@ def execute(
     if args.command == "create":
         if args.issue:
             raise UserError("Creation cannot accept an issue key; Jira assigns it.")
+        epic = (
+            epic_context.resolve(args, client, store, config)
+            if args.action == "story"
+            else args.epic
+        )
+        if args.action == "story":
+            epic_context.notice(epic, args)
         return service.create(
             Creation(
                 args.action.title(),
-                project,
+                epic.rsplit("-", 1)[0]
+                if epic and not args.epic and not args.project
+                else project,
                 creation_values(args),
-                args.epic,
+                epic,
                 not args.no_context,
+                args.watchers,
             )
         )
     issue = store.issue(args.issue)
@@ -161,12 +200,18 @@ def execute(
         return service.comment(
             issue, body if body is not None else service.ask("Comment text", [])
         )
-    if args.command in {"attach", "assign"}:
-        return (
-            service.assign_self(issue)
-            if args.command == "assign"
-            else service.attach(issue, args.files)
-        )
+    if args.command == "assign":
+        return service.assign_self(issue)
+    if args.command == "watcher":
+        return service.watch_existing(issue, args.watchers)
+    if args.command == "attach":
+        return service.attach(issue, args.files)
+    return set_action(args, service, issue)
+
+
+def set_action(
+    args: argparse.Namespace, service: Mutations, issue: str
+) -> dict[str, Any]:
     if args.action == "status":
         return service.transition(issue, args.value, assignments(args.field))
     if args.action == "epic":
