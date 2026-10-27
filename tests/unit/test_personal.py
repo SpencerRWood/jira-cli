@@ -21,6 +21,25 @@ LINK = "customfield_23456"
 type Network = tuple[dict[str, Any], list[httpx.Request]]
 
 
+def test_epic_include_done_only_broadens_assigned_rule(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup(
+        network,
+        [
+            issue("WWRAP-1", kind="Epic"),
+            issue("WWRAP-2", kind="Epic", category="done", assignee="other"),
+            issue("WWRAP-3", kind="Epic", category="done"),
+        ],
+        [issue("OTHER-1", epic="WWRAP-2")],
+    )
+    result = invoke(["epic", "list"], capsys)
+    assert [r["key"] for r in result["epics"]] == ["WWRAP-1", "WWRAP-2"]
+    result = invoke(["epic", "list", "--mine", "--include-done"], capsys)
+    assert [r["key"] for r in result["epics"]] == ["WWRAP-1", "WWRAP-3"]
+
+
 def issue(
     key: str,
     *,

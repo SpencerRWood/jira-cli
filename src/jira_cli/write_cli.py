@@ -35,7 +35,9 @@ def add_parsers(
             if name == "create":
                 for option in ["summary", "priority", "assignee", "epic"]:
                     leaf.add_argument("--" + option)
-                leaf.add_argument("--description-file", type=Path)
+                description = leaf.add_mutually_exclusive_group()
+                description.add_argument("--description")
+                description.add_argument("--description-file", type=Path)
                 leaf.add_argument("--from", dest="input_file", type=Path)
                 leaf.add_argument("--field", action="append", default=[])
                 leaf.add_argument("--no-context", action="store_true")
@@ -95,6 +97,8 @@ def creation_values(args: argparse.Namespace) -> dict[str, Any]:
             values[name] = value
     if args.description_file:
         values["description"] = read_text(args.description_file)
+    elif args.description is not None:
+        values["description"] = args.description
     return values
 
 

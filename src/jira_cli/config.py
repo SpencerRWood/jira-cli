@@ -44,9 +44,24 @@ class Jira(Model):
     auth: Auth = Field(default_factory=Auth)
 
 
+type Category = Literal["new", "indeterminate", "done"]
+
+
+def active_categories() -> list[Category]:
+    return ["new", "indeterminate"]
+
+
+class Filters(Model):
+    assigned_to: Literal["me", "all"] = "me"
+    status_categories: list[Category] = Field(
+        default_factory=active_categories, min_length=1
+    )
+
+
 class Defaults(Model):
     project: str = "WWRAP"
     issue_type: str = "Story"
+    filters: Filters = Field(default_factory=Filters)
 
 
 class Creation(Model):
@@ -72,9 +87,22 @@ class Reporting(Model):
     weekly_lookback_days: int = Field(default=7, gt=0)
 
 
+class AssigneeOutput(Model):
+    name_format: Literal["first_last", "original"] = "first_last"
+    include_email: bool = True
+    include_avatar: Literal[False] = False
+
+
+class NameOutput(Model):
+    source: Literal["name"] = "name"
+
+
 class Output(Model):
     format: Literal["table", "json"] = "table"
     show_issue_urls: bool = True
+    assignee: AssigneeOutput = Field(default_factory=AssigneeOutput)
+    priority: NameOutput = Field(default_factory=NameOutput)
+    status: NameOutput = Field(default_factory=NameOutput)
 
 
 class Config(Model):

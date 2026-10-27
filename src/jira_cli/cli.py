@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.table import Table
 
-from jira_cli import personal_cli, report_cli, reporting, write_cli
+from jira_cli import listing, personal_cli, report_cli, reporting, write_cli
 from jira_cli.client import JiraClient
 from jira_cli.completion import powershell
 from jira_cli.config import (
@@ -23,6 +23,7 @@ from jira_cli.config import (
     set_config,
 )
 from jira_cli.context import ContextStore, Selection
+from jira_cli.views import IssueViews
 
 
 def common(parser: argparse.ArgumentParser) -> None:
@@ -42,6 +43,15 @@ def common(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def issue_arguments(leaf: argparse.ArgumentParser, action: str) -> None:
+    if action in {"view", "open"}:
+        leaf.add_argument("key", nargs="?")
+    if action == "view":
+        leaf.add_argument("--detail", action="store_true")
+    if action in {"list", "select"}:
+        listing.flags(leaf)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="jira",
@@ -58,6 +68,7 @@ def parser() -> argparse.ArgumentParser:
         "auth": ["test"],
         "metadata": ["project", "fields", "transitions"],
         "issue": ["view", "list", "open", "select"],
+        "story": ["view", "list", "select"],
     }.items():
         group = commands.add_parser(name)
         common(group)
@@ -76,10 +87,8 @@ def parser() -> argparse.ArgumentParser:
                 leaf.add_argument("key", nargs="?")
             if name == "metadata" and action == "fields":
                 leaf.add_argument("--type", dest="issue_type", default="Story")
-            if name == "issue" and action in {"view", "open"}:
-                leaf.add_argument("key", nargs="?")
-            if name == "issue" and action == "view":
-                leaf.add_argument("--detail", action="store_true")
+            if name in {"issue", "story"}:
+                issue_arguments(leaf, action)
     for name in ["search", "doctor", "completion"]:
         leaf = commands.add_parser(name)
         common(leaf)
@@ -147,7 +156,11 @@ def local(args: argparse.Namespace, store: ContextStore) -> object:
 
 
 def remote(
-    args: argparse.Namespace, client: JiraClient, store: ContextStore, project: str
+    args: argparse.Namespace,
+    client: JiraClient,
+    store: ContextStore,
+    config: Config,
+    project: str,
 ) -> object:
     if args.command == "auth":
         return {"user": client.object("myself"), "project": client.project(project)}
@@ -173,7 +186,7 @@ def remote(
         return metadata(args, client, store, project)
     if args.command == "search":
         return client.search(args.jql)
-    return issues(args, client, store, project)
+    return issues(args, client, store, config, project)
 
 
 def metadata(
@@ -190,18 +203,21 @@ def metadata(
 
 
 def issues(
-    args: argparse.Namespace, client: JiraClient, store: ContextStore, project: str
+    args: argparse.Namespace,
+    client: JiraClient,
+    store: ContextStore,
+    config: Config,
+    project: str,
 ) -> object:
     if args.action in {"list", "select"}:
         if args.action == "select":
             personal_cli.require_picker(args)
-        rows = client.search(
-            f'project = "{project_key(project)}" ORDER BY updated DESC, key ASC'
-        )
+        presenter = IssueViews(client, config)
+        rows = listing.issues(args, presenter, project)
         return (
             personal_cli.select(rows, args, client, store)
             if args.action == "select"
-            else rows
+            else [presenter.normalize(row) for row in rows]
         )
     key = store.issue(args.issue or args.key)
     if args.action == "open":
@@ -211,21 +227,9 @@ def issues(
                 "Browser did not open; use the issue URL from jira issue view."
             )
         return {"url": url}
-    issue = client.issue(key)
-    issue["url"] = client.url(key)
-    fields = issue.get("fields")
-    if not isinstance(fields, dict):
-        raise UserError("Jira returned invalid issue fields.")
-    if args.detail:
-        return issue
-    return {
-        "key": issue.get("key"),
-        "url": issue["url"],
-        **{
-            name: fields.get(name)
-            for name in ["summary", "status", "priority", "assignee", "issuetype"]
-        },
-    }
+    presenter = IssueViews(client, config)
+    issue = presenter.get(key, "Story" if args.command == "story" else None)
+    return presenter.normalize(issue, detail=args.detail)
 
 
 def reports(
@@ -288,7 +292,7 @@ def run(args: argparse.Namespace) -> None:
         elif args.command in {"epic", "my"}:
             result = personal_cli.execute(args, client, store, config, project)
         else:
-            result = remote(args, client, store, project)
+            result = remote(args, client, store, config, project)
         emit(result, args, token.get_secret_value())
         if isinstance(result, dict) and result.get("success") is False:
             raise UserError(

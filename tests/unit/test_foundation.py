@@ -260,8 +260,9 @@ def test_search_paginates_and_honors_project(
         "WWRAP-1",
         "WWRAP-2",
     ]
-    assert [r.url.params["startAt"] for r in network[1]] == ["0", "1"]
-    assert 'project = "OTHER"' in network[1][0].url.params["jql"]
+    searches = [r for r in network[1] if r.url.path.endswith("/search")]
+    assert [r.url.params["startAt"] for r in searches] == ["0", "1"]
+    assert 'project = "OTHER"' in searches[0].url.params["jql"]
 
 
 @pytest.mark.parametrize("status", [301, 401, 403, 404, 429, 500])

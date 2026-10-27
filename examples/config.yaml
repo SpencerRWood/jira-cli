@@ -7,6 +7,9 @@ jira:
 defaults:
   project: WWRAP
   issue_type: Story
+  filters:
+    assigned_to: me
+    status_categories: [new, indeterminate]
 creation:
   set_context_after_create: true
 context:
@@ -25,3 +28,11 @@ reporting:
 output:
   format: table
   show_issue_urls: true
+  assignee:
+    name_format: first_last
+    include_email: true
+    include_avatar: false
+  priority:
+    source: name
+  status:
+    source: name
