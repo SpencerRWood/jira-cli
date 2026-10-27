@@ -7,7 +7,7 @@ import pytest
 
 from jira_cli.cli import main
 from jira_cli.config import Config, UserError
-from jira_cli.context import ContextStore
+from jira_cli.context import ContextStore, Selection
 from jira_cli.metadata import coerce, field_map, find_field, prepare
 
 pytestmark = pytest.mark.usefixtures("application", "write_metadata")
@@ -129,6 +129,67 @@ def write_metadata(
 
 def writes(network: tuple[dict[str, Any], list[httpx.Request]]) -> list[httpx.Request]:
     return [r for r in network[1] if r.method != "GET"]
+
+
+@pytest.mark.parametrize("use_context", [False, True])
+def test_assign_self_uses_authenticated_username_and_keeps_context(
+    application: Path,
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    use_context: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-1" if use_context else "WWRAP-99"))
+    before = (application / "state.json").read_bytes()
+    routes, requests = network
+    routes["user/assignable/search"] = [{"name": "fixture-user", "active": True}]
+    routes["PUT issue/WWRAP-1/assignee"] = httpx.Response(204)
+    args = ["assign", "--format", "json"]
+    if not use_context:
+        args.extend(["--issue", "WWRAP-1"])
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["assigned_to_self"] is True
+    sent = writes(network)
+    assert len(sent) == 1
+    assert sent[0].url.path.endswith("/WWRAP-1/assignee")
+    assert json.loads(sent[0].content) == {"name": "fixture-user"}
+    query = next(r for r in requests if r.url.path.endswith("/assignable/search"))
+    assert query.url.params["username"] == "fixture-user"
+    assert query.url.params["issueKey"] == "WWRAP-1"
+    assert (application / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("route", "response"),
+    [
+        ("myself", {}),
+        ("myself", {"name": "-1"}),
+        ("myself", {"name": " "}),
+        ("mypermissions", {"permissions": {}}),
+        ("serverInfo", {"version": "7.0", "deploymentType": "Server"}),
+        ("user/assignable/search", []),
+        ("user/assignable/search", [{"name": "fixture-user", "active": False}]),
+    ],
+)
+def test_assign_preflight_failure_never_writes(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    route: str,
+    response: object,
+) -> None:
+    network[0][route] = response
+    assert main(["assign", "--issue", "WWRAP-1"]) == 1
+    assert not writes(network)
+
+
+def test_assign_uncertain_write_is_not_retried(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    network[0]["user/assignable/search"] = [{"name": "fixture-user", "active": True}]
+    network[0]["PUT issue/WWRAP-1/assignee"] = httpx.ReadTimeout("fixture")
+    assert main(["assign", "--issue", "WWRAP-1"]) == 1
+    assert len(writes(network)) == 1
+    assert "retry" in capsys.readouterr().err.lower()
 
 
 def test_creation_uses_server_key_metadata_and_confirmed_context(

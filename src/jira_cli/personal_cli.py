@@ -1,15 +1,18 @@
 """Personal workflow arguments and explicit local context pickers."""
 
 import argparse
-import json
 import sys
 from collections.abc import Callable
 from typing import Any
+
+from rich.console import Console
+from rich.table import Table
 
 from jira_cli import personal
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError, issue_key
 from jira_cli.context import ContextStore
+from jira_cli.presentation import cell
 from jira_cli.views import IssueViews
 
 
@@ -72,19 +75,31 @@ def select(
     if not rows:
         raise UserError("No accessible matching issues are available for selection.")
     token = client.token.get_secret_value()
+    table = Table(title="Select an issue", show_lines=True)
+    table.add_column("#", justify="right", no_wrap=True)
+    table.add_column("Key", no_wrap=True)
+    table.add_column("Summary", ratio=3, overflow="fold")
+    table.add_column("Status", overflow="fold")
     for number, row in enumerate(rows, start=1):
         data = personal.fields(row)
-        label = json.dumps(
-            {
-                "key": row["key"],
-                "summary": data.get("summary"),
-                "completed_with_active_personal_stories": row.get(
-                    "completed_with_active_personal_stories", False
-                ),
-            },
-            ensure_ascii=True,
-        ).replace(json.dumps(token, ensure_ascii=True)[1:-1], "[REDACTED]")
-        sys.stderr.write(f"{number}: {label}\n")
+        status = data.get("status")
+        values = [
+            str(number),
+            row["key"],
+            data.get("summary"),
+            status.get("name") if isinstance(status, dict) else None,
+        ]
+        table.add_row(
+            *(
+                cell(
+                    value.replace(token, "[REDACTED]")
+                    if isinstance(value, str) and token
+                    else value
+                )
+                for value in values
+            )
+        )
+    Console(stderr=True, markup=False, highlight=False).print(table)
     sys.stderr.write("Select a number (blank cancels): ")
     try:
         answer = input().strip()

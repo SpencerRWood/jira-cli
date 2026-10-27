@@ -14,7 +14,7 @@ from jira_cli.config import Config, UserError
 from jira_cli.context import ContextStore
 from jira_cli.mutations import MISSING, Creation, Mutations
 
-COMMANDS = {"create", "comment", "attach", "set"}
+COMMANDS = {"create", "comment", "attach", "set", "assign"}
 
 
 def add_parsers(
@@ -58,6 +58,8 @@ def add_parsers(
     attach = commands.add_parser("attach")
     flags(attach)
     attach.add_argument("files", nargs="+", type=Path)
+    assign = commands.add_parser("assign", help="Assign an issue to yourself.")
+    flags(assign)
 
 
 def assignments(items: list[str]) -> dict[str, Any]:
@@ -159,8 +161,12 @@ def execute(
         return service.comment(
             issue, body if body is not None else service.ask("Comment text", [])
         )
-    if args.command == "attach":
-        return service.attach(issue, args.files)
+    if args.command in {"attach", "assign"}:
+        return (
+            service.assign_self(issue)
+            if args.command == "assign"
+            else service.attach(issue, args.files)
+        )
     if args.action == "status":
         return service.transition(issue, args.value, assignments(args.field))
     if args.action == "epic":

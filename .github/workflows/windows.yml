@@ -21,6 +21,8 @@ jobs:
       - name: Verify PowerShell arguments without Jira requests
         shell: pwsh
         run: |
+          uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="assign"; assert args.issue=="WWRAP-123"' assign --issue WWRAP-123
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $description = @'
           First fixture line with "quotes" and an apostrophe's value.
           Second fixture line with a literal `backtick` and spaces.
@@ -51,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $cases = @{
             'jira ep' = 'epic'
+            'jira ass' = 'assign'
+            'jira assign --iss' = '--issue'
             'jira epic v' = 'view'
             'jira my today --sort p' = 'priority'
             'jira --project WWRAP epic list --with' = '--with-my-stories'
