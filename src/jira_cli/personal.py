@@ -7,6 +7,7 @@ from typing import Any
 
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError, issue_key, project_key
+from jira_cli.views import IssueViews
 
 FIELDS = "summary,status,priority,assignee,issuetype,updated,duedate,issuelinks"
 EPIC_SCHEMA = "com.pyxis.greenhopper.jira:gh-epic-link"
@@ -78,7 +79,12 @@ def personal_counts(client: JiraClient, link: str, jql_link: str) -> Counter[str
 
 
 def epic_list(
-    client: JiraClient, config: Config, project: str, mode: str
+    client: JiraClient,
+    config: Config,
+    project: str,
+    mode: str,
+    *,
+    include_done: bool = False,
 ) -> list[dict[str, Any]]:
     link, jql_link = epic_link(client)
     counts = personal_counts(client, link, jql_link)
@@ -97,7 +103,7 @@ def epic_list(
         mine = (
             isinstance(assignee, dict)
             and assignee.get("name") == user["name"]
-            and not completed
+            and (include_done or not completed)
         )
         count = counts[epic["key"]]
         include = {
@@ -126,14 +132,16 @@ def epic_list(
     return list(result.values())
 
 
-def epic_view(client: JiraClient, key: str, *, all_stories: bool) -> dict[str, Any]:
-    epic = client.issue(key)
-    data = fields(epic)
-    if (
-        not isinstance(data.get("issuetype"), dict)
-        or data["issuetype"].get("name") != "Epic"
-    ):
-        raise UserError("Selected issue is not an Epic.")
+def epic_view(
+    client: JiraClient,
+    key: str,
+    config: Config,
+    *,
+    all_stories: bool,
+    detail: bool = False,
+) -> dict[str, Any]:
+    presenter = IssueViews(client, config)
+    epic = presenter.get(key, "Epic")
     completed = done(epic)
     _, jql_link = epic_link(client)
     personal = client.search(
@@ -162,10 +170,15 @@ def epic_view(client: JiraClient, key: str, *, all_stories: bool) -> dict[str, A
         priority = story_fields.get("priority") or {}
         if not isinstance(status, dict) or not isinstance(priority, dict):
             raise UserError("Jira returned invalid Story grouping fields.")
-        group = (str(status.get("name", "Unknown")), str(priority.get("name", "None")))
-        groups.setdefault(group, []).append({**story, "url": client.url(story["key"])})
+        normalized = presenter.normalize(story)
+        group = (
+            str(normalized["status"] or "Unknown"),
+            str(normalized["priority"] or "None"),
+        )
+        normalized["epic"] = key
+        groups.setdefault(group, []).append(normalized)
     return {
-        "epic": {**epic, "url": client.url(key)},
+        **presenter.normalize(epic, detail=detail),
         "story_scope": "all" if all_stories else "mine",
         "my_active_story_count": active,
         "completed_with_active_personal_stories": completed and active > 0,

@@ -95,6 +95,8 @@ jira context set WWRAP-456 --global
 jira context use-project WWRAP
 jira context clear
 jira issue view --issue WWRAP-123 --detail --format json
+jira story view WWRAP-123
+jira story list
 jira issue list --project WWRAP --format json
 jira search --jql 'project = WWRAP AND assignee = currentUser()' --format json
 jira issue open WWRAP-123
@@ -123,7 +125,9 @@ and normalized for the platform.
 Issue views default to compact fields; `--detail` includes accessible metadata,
 description, comments, attachments, links, and configured custom fields. Search
 consumes all reported pages. Arbitrary `search --jql` is used exactly as provided;
-`issue list` applies the selected project. Jira permission errors remain authoritative.
+`issue list` and `story list` apply the selected project, current-user assignment,
+and configured active status categories by default. `story list` additionally
+restricts issue type to Story. Jira permission errors remain authoritative.
 All Foundation operations against Jira are GET requests, with no automatic retries.
 
 Common flags can appear before or after subcommands: `--issue`, `--project`,
@@ -143,6 +147,80 @@ Completion derives commands, subcommands, options, and finite option choices fro
 the argument parser. It needs no configuration, credentials, or network, and never
 queries Jira while you type. Dynamic issue keys and server-defined status values
 remain explicit arguments or interactive choices.
+
+### Consistent Issue, Story, and Epic views
+
+`issue view` handles any issue type. `story view` and `epic view` validate the
+returned type and fail clearly on a mismatch. Each accepts a positional key,
+`--issue KEY`, or the existing working context when the key is omitted. Explicit
+views do not apply list filters. All three use shared retrieval/normalization and
+the same table/JSON presentation. `epic view` retains grouped child Stories,
+`--mine`, and `--all-stories`; `--detail` is available on all three views.
+
+Default JSON uses `key`, `url`, `summary`, `type`, `priority`, `status`, `assignee`,
+and `epic`. Status/priority are readable names; `epic` is a directly associated
+Epic key or null. A priority ID without a name is resolved against Jira's actual
+priority metadata. Unknown names stay null; icon filenames never determine priority.
+Assignees use only Jira `displayName` and, when supplied/permitted, `emailAddress`.
+Simple `Last, First` names become `First Last`; multipart, annotated, or ambiguous
+names stay unchanged. Missing assignees/emails are valid. Avatar/icon objects are
+excluded. Detailed views add whitelisted descriptions, dates, comments, attachments,
+and related issue keys. Raw REST envelopes and the former nested Epic envelope are
+replaced by this normalized schema; scripts should use these field names. Explicit
+`search --jql` still returns the search response issues without changing the JQL.
+
+The existing single YAML schema gains optional defaults; old config files still
+load without edits. Presentation settings stay under the existing `output` section
+instead of adding a second display section:
+
+```yaml
+defaults:
+  project: WWRAP
+  issue_type: Story
+  filters:
+    assigned_to: me
+    status_categories: [new, indeterminate]
+output:
+  format: table
+  show_issue_urls: true
+  assignee:
+    name_format: first_last
+    include_email: true
+    include_avatar: false
+  priority:
+    source: name
+  status:
+    source: name
+```
+
+These are additions to your current config, not a replacement for its Jira URL,
+authentication, context, Epic, or reporting settings. Category values are Jira's
+stable keys `new`, `indeterminate`, and `done`, resolved to IDs from live category
+metadata before constructing JQL. `assigned_to` accepts `me` or `all`;
+`name_format` accepts `first_last` or `original`. Email display can be disabled.
+Avatar inclusion and icon-derived priority/status sources are unsupported. PAT
+loading from the fixed application `.env` is unchanged.
+
+For Issue/Story lists and pickers, `--mine` explicitly selects your assignments;
+`--include-done` retains the ownership filter but includes all categories.
+`--all` includes all visible assignees/categories within the selected project and
+restores the former unfiltered Issue-list behavior. `--all` and `--mine` conflict;
+`--all --include-done` is redundant but valid. `--project` retains its established
+precedence. `story select` and `issue select` also require unresolved issues by
+default (`resolution IS EMPTY`); `--all` or `--include-done` removes that restriction.
+They use the existing local context picker, with no Jira writes. My Today keeps
+its own unresolved/current-user semantics and cross-project default.
+
+Epic listing/selection stays separate: relevant Epics are the deduplicated union
+of assigned open Epics and Epics with active personal Stories, including completed
+Epics from the second rule. General list defaults never add a blanket assignee
+filter to Epics. Existing `--mine`, `--with-my-stories`, `--all`, and `--project`
+remain; Epic `--include-done` broadens only the assigned-Epic rule, without counting
+completed child Stories as active. The existing `epics` YAML section is unchanged.
+
+See the [Windows handoff verification guide](docs/windows-handoff-testing.md) for
+read-first corporate checks, filter comparisons, and separately authorized inline
+description testing. Automated fixtures are not evidence of live Jira integration.
 
 ## Personal daily workflows
 
@@ -276,6 +354,7 @@ metadata schemas and ambiguous fields/values fail clearly, without guessing.
 ```powershell
 jira create story --summary 'Investigate a test issue' --description-file '.\body.txt' --priority High --assignee username --epic WWRAP-100 --non-interactive
 jira create epic --summary 'Test epic' --field 'Epic Name=Test epic' --non-interactive
+jira create story --summary 'Test inline description' --description 'Fixture requirements text' --non-interactive
 jira create story --from '.\issue.yaml' --summary 'Explicit override' --no-context
 jira comment add 'Authorized test comment' --issue WWRAP-123
 jira comment add --file '.\comment.txt' --issue WWRAP-123
@@ -315,6 +394,13 @@ use `--field`; Epic Name is included only if the instance advertises it. Arrays 
 JSON on the command line, or native YAML lists in the input file. Creation never
 accepts a chosen issue key, project field override, or issue-type override: Jira
 allocates the key for the explicitly selected project and Story/Epic command.
+
+Both `create story` and `create epic` accept `--description` for inline text,
+including PowerShell here-string multiline input, or `--description-file` for
+an explicit UTF-8 file. Supplying both is a syntax error before any Jira request.
+Explicit inline/file descriptions override input YAML or generic field assignments;
+without either, the existing YAML/metadata-driven interactive behavior remains.
+Server-assigned keys and confirmed-creation context updates are unchanged.
 
 Missing required creation/transition values, field choices, and epic keys prompt
 only in an interactive terminal. `--non-interactive` and redirected stdin fail

@@ -10,6 +10,7 @@ from jira_cli import personal
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError, issue_key
 from jira_cli.context import ContextStore
+from jira_cli.views import IssueViews
 
 
 def add_parsers(
@@ -29,9 +30,11 @@ def add_parsers(
         if action == "view":
             leaf.add_argument("key", nargs="?")
             mode.add_argument("--all-stories", action="store_true")
+            leaf.add_argument("--detail", action="store_true")
         else:
             mode.add_argument("--with-my-stories", action="store_true")
             mode.add_argument("--all", action="store_true")
+            leaf.add_argument("--include-done", action="store_true")
     group = commands.add_parser("my", help="Personal work across accessible projects.")
     flags(group)
     actions = group.add_subparsers(dest="action", required=True)
@@ -112,10 +115,26 @@ def execute(
 ) -> object:
     if args.command == "my":
         # My Today deliberately ignores default/env/saved project selection.
-        return personal.my_today(client, config, args.project, args.sort)
+        result = personal.my_today(client, config, args.project, args.sort)
+        presenter = IssueViews(client, config)
+        result["issues"] = [
+            {
+                **presenter.normalize(row),
+                "due_date": personal.fields(row).get("duedate"),
+                "updated": personal.fields(row).get("updated"),
+                "blockers": row["blockers"],
+                "inferred_risks": row["inferred_risks"],
+            }
+            for row in result["issues"]
+        ]
+        return result
     if args.action == "view":
         return personal.epic_view(
-            client, store.issue(args.issue or args.key), all_stories=args.all_stories
+            client,
+            store.issue(args.issue or args.key),
+            config,
+            all_stories=args.all_stories,
+            detail=args.detail,
         )
     if args.action == "select":
         require_picker(args)
@@ -126,9 +145,25 @@ def execute(
         if args.with_my_stories
         else "all"
         if args.all
-        else "relevant"
+        else config.epics.default_filter
     )
-    rows = personal.epic_list(client, config, project, mode)
+    rows = personal.epic_list(
+        client, config, project, mode, include_done=args.include_done
+    )
     if args.action == "select":
         return select(rows, args, client, store)
-    return {"scope": project, "filter": mode, "epics": rows}
+    presenter = IssueViews(client, config)
+    return {
+        "scope": project,
+        "filter": mode,
+        "epics": [
+            {
+                **presenter.normalize(row),
+                "my_active_story_count": row["my_active_story_count"],
+                "completed_with_active_personal_stories": row[
+                    "completed_with_active_personal_stories"
+                ],
+            }
+            for row in rows
+        ],
+    }

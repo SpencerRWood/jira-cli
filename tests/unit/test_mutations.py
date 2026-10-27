@@ -13,6 +13,32 @@ from jira_cli.metadata import coerce, field_map, find_field, prepare
 pytestmark = pytest.mark.usefixtures("application", "write_metadata")
 
 
+@pytest.mark.parametrize("kind", ["story", "epic"])
+def test_inline_description_creation_preserves_multiline_and_context(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    kind: str,
+) -> None:
+    description = 'First line\nSecond line with "quotes", apostrophes and backticks `.'
+    args = [
+        "create",
+        kind,
+        "--summary",
+        "Fixture",
+        "--description",
+        description,
+        "--non-interactive",
+    ]
+    if kind == "epic":
+        args.extend(["--field", "Epic Name=Fixture Epic"])
+    assert main(args) == 0
+    sent = next(
+        r for r in network[1] if r.method == "POST" and r.url.path.endswith("/issue")
+    )
+    assert json.loads(sent.content)["fields"]["description"] == description
+    assert ContextStore(application, Config()).selection().issue == "WWRAP-100"
+
+
 @pytest.fixture
 def write_metadata(
     network: tuple[dict[str, Any], list[httpx.Request]],

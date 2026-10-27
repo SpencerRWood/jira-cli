@@ -18,6 +18,22 @@ jobs:
       - run: uv sync --frozen --group dev
       - run: uv run pytest --cov=jira_cli --cov-report=term-missing
       - run: uv build
+      - name: Verify PowerShell arguments without Jira requests
+        shell: pwsh
+        run: |
+          $description = @'
+          First fixture line with "quotes" and an apostrophe's value.
+          Second fixture line with a literal `backtick` and spaces.
+          '@
+          $env:JIRA_CLI_TEST_DESCRIPTION = $description
+          try {
+            foreach ($kind in @('story', 'epic')) {
+              uv run --frozen python -c 'import os,sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="create"; assert args.description==os.environ["JIRA_CLI_TEST_DESCRIPTION"]; assert args.summary=="Fixture title"' create $kind --summary 'Fixture title' --description $description --non-interactive
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          } finally {
+            Remove-Item Env:JIRA_CLI_TEST_DESCRIPTION
+          }
       - name: Verify global installation and PowerShell entrypoint
         shell: pwsh
         run: |
@@ -29,6 +45,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $jira report --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $jira story view --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $jira completion powershell | Out-String | Invoke-Expression
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $cases = @{
@@ -37,6 +55,8 @@ jobs:
             'jira my today --sort p' = 'priority'
             'jira --project WWRAP epic list --with' = '--with-my-stories'
             'jira report daily --format c' = 'csv'
+            'jira story v' = 'view'
+            'jira create story --desc' = '--description'
           }
           foreach ($line in $cases.Keys) {
             $matches = (TabExpansion2 $line $line.Length).CompletionMatches.CompletionText

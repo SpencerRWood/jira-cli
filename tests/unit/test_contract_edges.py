@@ -85,7 +85,12 @@ def test_explicit_environment_project_precedes_saved_context(
     capsys.readouterr()
     monkeypatch.setenv("JIRA_PROJECT", "ENVIRONMENT")
     assert main(["issue", "list", "--format", "json"]) == 0
-    assert 'project = "ENVIRONMENT"' in network[1][0].url.params["jql"]
+    assert (
+        'project = "ENVIRONMENT"'
+        in next(r for r in network[1] if r.url.path.endswith("/search")).url.params[
+            "jql"
+        ]
+    )
     capsys.readouterr()
     assert main(["issue", "list", "--project", "EXPLICIT", "--quiet"]) == 0
     assert 'project = "EXPLICIT"' in network[1][-1].url.params["jql"]

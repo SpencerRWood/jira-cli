@@ -36,10 +36,17 @@ def network(
         "serverInfo": {"version": "10.3.0", "deploymentType": "Data Center"},
         "myself": {"name": "fixture-user"},
         "project/WWRAP": {"key": "WWRAP"},
+        "field": [],
+        "statuscategory": [
+            {"id": 2, "key": "new", "name": "To Do"},
+            {"id": 4, "key": "indeterminate", "name": "In Progress"},
+            {"id": 3, "key": "done", "name": "Done"},
+        ],
         "issue/WWRAP-1": {
             "key": "WWRAP-1",
             "fields": {
                 "summary": "Fixture issue",
+                "issuetype": {"name": "Story"},
                 "description": "fixture-pat-never-print",
                 "attachment": [],
             },
@@ -67,7 +74,12 @@ def network(
                 json={
                     "startAt": start,
                     "total": 2,
-                    "issues": [{"key": f"WWRAP-{start + 1}"}],
+                    "issues": [
+                        {
+                            "key": f"WWRAP-{start + 1}",
+                            "fields": {"summary": "Fixture issue"},
+                        }
+                    ],
                 },
             )
         route = path if request.method == "GET" else request.method + " " + path
