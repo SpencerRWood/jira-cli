@@ -201,10 +201,11 @@ def test_consistent_views_latest_and_detail(
     assert "Value" in output
     assert "Comment 27" in output
     assert "Comment 26" not in output
-    assert "Full description" not in output
+    assert ("Full description" in output) == (command == "story")
     assert "HIDDEN" not in output
     assert main([command, "view", key, "--detail"]) == 0
     output = capsys.readouterr().out
+    assert output.count("Description") == 1
     assert output.index("Comment 27", output.index("Author")) < output.index(
         "Comment 26"
     )
@@ -216,6 +217,30 @@ def test_consistent_views_latest_and_detail(
     assert "HIDDEN" not in output
     if command == "epic":
         assert "Child Stories (mine)" in output
+
+
+@pytest.mark.parametrize(
+    "description", [None, "", "First description line\nSecond line"]
+)
+def test_story_default_description(
+    ux: Network,
+    capsys: pytest.CaptureFixture[str],
+    description: str | None,
+) -> None:
+    ux[0]["issue/WWRAP-10"]["fields"]["description"] = description
+    assert main(["story", "view", "WWRAP-10"]) == 0
+    output = capsys.readouterr().out
+    assert output.count("Description") == 1
+    if description:
+        assert "First description line" in output
+        assert "Second line" in output
+        assert "\\n" not in output
+    else:
+        line = next(line for line in output.splitlines() if "Description" in line)
+        assert "—" in line
+    assert len([r for r in ux[1] if r.url.path.endswith("/issue/WWRAP-10")]) == 1
+    result = invoke(["story", "view", "WWRAP-10"], capsys)
+    assert result["description"] == description
 
 
 def test_paged_comments_limit_and_latest(

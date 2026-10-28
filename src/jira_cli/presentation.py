@@ -71,6 +71,40 @@ def row_cells(row: dict[str, Any], *, epics: bool, stories: bool = False) -> lis
     return values
 
 
+def my_today(data: dict[str, Any]) -> None:
+    console = Console(markup=False, highlight=False)
+    console.print(
+        "Scope: " + cell(data.get("scope")) + "  Sort: " + cell(data.get("sort"))
+    )
+    rows = data["issues"]
+    if not rows:
+        console.print("No matching issues.")
+        return
+    table = Table(title=f"My Today ({len(rows)})", show_lines=True)
+    table.add_column("Key", no_wrap=True)
+    table.add_column("Summary", ratio=3, overflow="fold")
+    for label in ["Status", "Priority", "Due Date", "Updated"]:
+        table.add_column(label, overflow="fold")
+    table.add_column("Latest Comment", ratio=2, overflow="fold")
+    table.add_column("Attention", overflow="fold")
+    for row in rows:
+        notes = []
+        if blockers := row.get("blockers"):
+            notes.append("Blocked by: " + ", ".join(blockers))
+        notes.extend("Inferred: " + risk for risk in row.get("inferred_risks", []))
+        table.add_row(
+            cell(row.get("key")),
+            text(row.get("summary")),
+            cell(row.get("status")),
+            cell(row.get("priority")),
+            cell(row.get("due_date")),
+            timestamp(row.get("updated")),
+            comment_text(row.get("latest_comment")),
+            text("\n".join(notes)),
+        )
+    console.print(table)
+
+
 def text(value: object) -> str:
     """Keep line breaks while escaping other terminal control characters."""
     if not isinstance(value, str) or not value:
@@ -136,6 +170,8 @@ def issue_view(data: dict[str, Any], *, detail: bool) -> None:
         (label, data.get(key))
         for label, key in [("Key", "key"), ("URL", "url"), ("Summary", "summary")]
     ]
+    if not detail and str(data.get("type") or "").casefold() == "story":
+        rows.append(("Description", data.get("description")))
     if data.get("type") == "Epic":
         rows.append(("Epic Name", data.get("epic_name")))
     else:
