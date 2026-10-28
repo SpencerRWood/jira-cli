@@ -251,6 +251,7 @@ def test_today_across_projects_and_sort(
     assert "project =" not in request.url.params["jql"]
     assert "resolution IS EMPTY" in request.url.params["jql"]
     assert "currentUser()" in request.url.params["jql"]
+    assert 'issuetype != "Epic"' in request.url.params["jql"]
     assert (
         "ORDER BY "
         + {
@@ -565,9 +566,38 @@ def test_today_empty_table(
     setup(network, [], [])
     assert main(["my", "today"]) == 0
     output = capsys.readouterr().out
-    assert "Scope: all-accessible-projects  Sort: due-date" in output
+    assert "Scope: all-accessible-projects  Sort: staleness" in output
     assert "No matching issues." in output
     assert invoke(["my", "today"], capsys)["issues"] == []
+
+
+def test_today_defaults_to_oldest_updates_and_excludes_epics(
+    network: Network, capsys: pytest.CaptureFixture[str]
+) -> None:
+    older = issue("OTHER-10", kind="Bug")
+    older["fields"]["updated"] = "2026-10-01T10:30:00+00:00"
+    newer = issue("WWRAP-11")
+    newer["fields"]["updated"] = "2026-10-27T10:30:00+00:00"
+
+    def search(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["jql"] == (
+            'assignee = currentUser() AND resolution IS EMPTY AND issuetype != "Epic"'
+            " ORDER BY updated ASC, key ASC"
+        )
+        return httpx.Response(
+            200, json={"startAt": 0, "total": 2, "issues": [older, newer]}
+        )
+
+    network[0]["search"] = search
+    result = invoke(["my", "today"], capsys)
+    assert result["sort"] == "staleness"
+    assert [row["key"] for row in result["issues"]] == ["OTHER-10", "WWRAP-11"]
+    assert [row["type"] for row in result["issues"]] == ["Bug", "Story"]
+    assert len(network[1]) == 1
+    assert main(["my", "today"]) == 0
+    output = capsys.readouterr().out
+    assert "Sort: staleness" in output
+    assert output.index("OTHER-10") < output.index("WWRAP-11")
 
 
 def test_today_table_escapes_controls_and_redacts_pat(

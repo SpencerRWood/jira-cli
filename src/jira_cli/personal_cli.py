@@ -46,7 +46,8 @@ def add_parsers(
     today.add_argument(
         "--sort",
         choices=["due-date", "priority", "status", "staleness"],
-        default="due-date",
+        default="staleness",
+        help="Sort by staleness (oldest update first) by default.",
     )
 
 

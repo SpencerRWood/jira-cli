@@ -281,10 +281,11 @@ jira issue select
 jira epic select
 ```
 
-`my today` lists unresolved issues assigned to the authenticated user across all
-accessible projects. Only an explicit `--project` restricts this command; YAML,
-`JIRA_PROJECT`, and saved project context do not narrow it. `--sort due-date`
-(default), `priority`, `status`, or `staleness` uses Jira's configured order, with
+`my today` lists unresolved non-Epic issues assigned to the authenticated user
+across all accessible projects. Only an explicit `--project` restricts this command; YAML,
+`JIRA_PROJECT`, and saved project context do not narrow it. By default, it sorts by
+staleness, showing the least recently updated issues first. Explicit `--sort due-date`,
+`priority`, `status`, or `staleness` uses Jira's configured order, with
 the issue key as a tie breaker. Staleness means oldest last update first.
 Observation times and due-date comparisons use UTC. Overdue and stale items
 (using `reporting.aging_threshold_days`) are labeled inferred risks. Blockers are
