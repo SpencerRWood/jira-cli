@@ -40,11 +40,14 @@ def done(issue: dict[str, Any]) -> bool:
 
 
 def epic_link(client: JiraClient) -> tuple[str, str]:
-    metadata = client.get("field")
+    metadata = client.field_metadata
+    if metadata is None:
+        metadata = client.get("field")
     if not isinstance(metadata, list) or any(
         not isinstance(item, dict) for item in metadata
     ):
         raise UserError("Jira returned invalid field metadata.")
+    client.field_metadata = metadata
     matches = [
         item.get("id")
         for item in metadata
@@ -62,8 +65,9 @@ def epic_link(client: JiraClient) -> tuple[str, str]:
 def personal_counts(client: JiraClient, link: str, jql_link: str) -> Counter[str]:
     stories = client.search(
         'issuetype = "Story" AND assignee = currentUser() '
-        f"AND statusCategory != Done AND {jql_link} IS NOT EMPTY ORDER BY key ASC",
-        FIELDS + "," + link,
+        f"AND resolution IS EMPTY AND statusCategory != Done "
+        f"AND {jql_link} IS NOT EMPTY ORDER BY key ASC",
+        FIELDS + ",resolution," + link,
     )
     counts: Counter[str] = Counter()
     seen: set[str] = set()
@@ -73,7 +77,7 @@ def personal_counts(client: JiraClient, link: str, jql_link: str) -> Counter[str
         if key in seen:
             continue
         seen.add(key)
-        if not done(story) and data.get(link):
+        if not done(story) and not data.get("resolution") and data.get(link):
             counts[issue_key(str(data[link]))] += 1
     return counts
 
@@ -93,7 +97,7 @@ def epic_list(
         raise UserError("Jira current user identity is unavailable.")
     epics = client.search(
         f'project = "{project_key(project)}" AND issuetype = "Epic" ORDER BY key ASC',
-        FIELDS + ",resolution",
+        IssueViews(client, config).search_fields() + ",resolution",
     )
     result: dict[str, dict[str, Any]] = {}
     for epic in epics:
@@ -103,11 +107,7 @@ def epic_list(
         mine = (
             isinstance(assignee, dict)
             and assignee.get("name") == user["name"]
-            and (
-                include_done
-                or not completed
-                or ("resolution" in data and data["resolution"] is None)
-            )
+            and (include_done or not completed)
         )
         count = counts[epic["key"]]
         include = {
@@ -146,6 +146,7 @@ def epic_view(
 ) -> dict[str, Any]:
     presenter = IssueViews(client, config)
     epic = presenter.get(key, "Epic")
+    presenter.enrich([epic])
     completed = done(epic)
     _, jql_link = epic_link(client)
     personal = client.search(
@@ -180,6 +181,8 @@ def epic_view(
             str(normalized["priority"] or "None"),
         )
         normalized["epic"] = key
+        normalized["epic_key"] = key
+        normalized["epic_name"] = presenter.epic_name(fields(epic))
         groups.setdefault(group, []).append(normalized)
     return {
         **presenter.normalize(epic, detail=detail, include_description=True),

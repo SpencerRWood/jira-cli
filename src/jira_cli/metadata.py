@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Any
 
 from jira_cli.config import UserError, issue_key
+from jira_cli.views import EPIC_NAME_SCHEMA
 
 type Fields = dict[str, dict[str, Any]]
 type Ask = Callable[[str, list[str]], str]
@@ -26,6 +27,18 @@ def field_map(values: object) -> Fields:
 
 
 def find_field(name: str, specs: Fields) -> str:
+    if name == "epic_name":
+        matches = [
+            key
+            for key, spec in specs.items()
+            if isinstance(spec.get("schema"), dict)
+            and spec["schema"].get("custom") == EPIC_NAME_SCHEMA
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise UserError("Epic Name creation metadata is ambiguous.")
+        name = "Epic Name"
     if name in specs:
         return name
     matches = [

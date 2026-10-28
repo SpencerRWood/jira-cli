@@ -21,8 +21,14 @@ accessible Story/Epic keys; do not create new issues for this phase.
 ```powershell
 jira auth test --project WWRAP
 jira doctor --project WWRAP
-jira story view WWRAP-123
-jira epic view WWRAP-100
+$story = Read-Host 'Authorized existing Story key'
+$epic = Read-Host 'Authorized existing Epic key'
+jira context set $story
+jira context show
+jira story view $story
+jira story view $story --detail
+jira epic view $epic
+jira epic view $epic --detail
 jira issue view WWRAP-123
 jira story list
 jira epic list
@@ -33,8 +39,25 @@ Compare with Jira's UI: key/URL/summary/type, configured priority and status nam
 assignee display name/email availability, and direct Epic association. Check a
 known `Last, First` name is reordered only when unambiguous. Missing assignees or
 hidden email addresses must not fail. No avatar/icon URLs should appear by default.
-Check `--format json` uses the same normalized names and fields. Check `--detail`
-adds business details rather than raw REST envelopes.
+Check `--format json` uses the same normalized names and fields, including
+`epic_key` and `epic_name`. Story lists show Epic Key and Epic Name; absent or
+inaccessible epics have empty names. Epic lists show exactly Key, Epic Name,
+Summary, Status, Priority, Assignee, My Active Stories, in that order.
+
+Views use a wrapping Field/Value table with the latest accessible comment.
+Detailed views retain those fields, add the full description, created/updated
+dates, attachment filenames and related issue keys, and show one comment per row,
+newest first with multiline content. Check a paged history against Jira's UI;
+only comments accessible to the PAT user may appear. Detailed views default to
+20 comments; `jira config set output.comment_limit 50` changes that limit in the
+existing config.yaml (valid range 1–1000). Default views still show one comment.
+Epic details have a separate child Story table honoring `--mine`/`--all-stories`.
+
+Context set/show displays project, issue, summary, status and parent epic key/name.
+Check an existing issue whose association was changed through an independently
+authorized Jira workflow: `context show` must reflect the current association.
+Do not change an issue merely for this check. With connectivity unavailable,
+saved context remains usable and output clearly reports unavailable live data.
 
 `story view` must reject a known Epic; `epic view` must reject a known Story;
 generic `issue view` must accept both. Test context using an existing selection:
@@ -66,11 +89,12 @@ work. Explicit `search --jql` must execute exactly the supplied query.
 For Epic relevance, use existing known examples if available: an assigned open
 Epic; an Epic assigned to someone else with your active Story; and a completed
 Epic with your active Story. The latter two must remain relevant, with no duplicates
-and with the completed-Epic marker/counts visible. Do not change live assignees or
+and with the active Story counts visible. Do not change live assignees or
 statuses merely to manufacture test cases.
 
-An assigned Epic with an empty resolution should also appear, even without active
-child Stories or with a Done status category. The selected project still applies.
+An assigned Epic in the Done category without active personal Stories is excluded,
+even if its resolution is empty. `--mine --include-done` explicitly broadens that
+filter. The selected project still applies.
 Set an existing Epic as local context and verify Story scoping read-only:
 
 ```powershell
@@ -118,8 +142,22 @@ account and that `jira context show` remains unchanged. Story creation always
 preserves context; `--no-context` remains valid but is unnecessary for Stories.
 If an Epic is active, confirm the new Story's Epic Link matches it. Use an explicit
 `--assignee` only when authorized to test that override.
-Separately authorized Epic testing uses `create epic` with the
-same description options and all metadata-required fields (such as Epic Name).
+Separately authorized Epic testing uses a distinct native Epic Name and Summary:
+
+```powershell
+# Execute only after approval of this test case and project.
+jira create epic --project WWRAP `
+  --epic-name 'Authorized CLI Test Epic' `
+  --summary 'Approved test of distinct name and summary' `
+  --description $description --non-interactive
+```
+
+Provide any other metadata-required fields. Verify the native Epic Name custom
+field and Summary independently in Jira, plus its server-allocated key.
+Interactive creation prompts for required Epic Name when omitted. YAML creation
+accepts `epic_name: Authorized CLI Test Epic` alongside `summary:`; existing
+`Epic Name`/custom field ID definitions remain supported. No Summary-to-name
+copy occurs. `--description-file` and inline `--description` remain alternatives.
 Epic context-after-confirmed-creation behavior is unchanged. Retain the existing
 description-file path as an alternative.
 
@@ -147,3 +185,8 @@ instance. Track certificate/proxy policy, priority/category metadata availabilit
 Epic Link schema, display-name formats, hidden email behavior, and required custom
 fields as corporate verification items. A mocked test pass must never be recorded
 as Corporate Integration Verified.
+
+Corporate compatibility questions still pending: the instance's Epic Link and
+Epic Name schema metadata, project-specific creation screens/required fields,
+comment pagination and `orderBy=-created` behavior, hidden comment permissions,
+and terminal wrapping in the approved PowerShell/VS Code font and width.

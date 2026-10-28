@@ -18,6 +18,7 @@ class JiraClient:
     def __init__(self, config: Config, token: SecretStr) -> None:
         self.base_url = base_url(config)
         self.token = token
+        self.field_metadata: list[dict[str, Any]] | None = None
         self.http = httpx.Client(
             base_url=self.base_url + "/rest/api/2/",
             headers={
@@ -120,6 +121,38 @@ class JiraClient:
         return self.object(
             "issue/" + issue_key(key), {"fields": "*all", "expand": "names"}
         )
+
+    def comments(self, key: str, limit: int) -> list[dict[str, Any]]:
+        """Read accessible comments newest first, respecting server page caps."""
+        rows: list[dict[str, Any]] = []
+        start = 0
+        while len(rows) < limit:
+            page = self.object(
+                "issue/" + issue_key(key) + "/comment",
+                {
+                    "startAt": start,
+                    "maxResults": min(100, limit - len(rows)),
+                    "orderBy": "-created",
+                },
+            )
+            values, total = page.get("comments"), page.get("total")
+            if (
+                not isinstance(values, list)
+                or any(not isinstance(row, dict) for row in values)
+                or type(total) is not int
+                or total < 0
+                or page.get("startAt") != start
+            ):
+                raise UserError("Jira returned an invalid comment page.")
+            rows.extend(values)
+            start += len(values)
+            if start >= total:
+                break
+            if not values:
+                raise UserError(
+                    "Jira comment pagination ended before the reported total."
+                )
+        return rows[:limit]
 
     def search(
         self,
