@@ -257,7 +257,7 @@ def my_today(
         "assignee = currentUser() AND resolution IS EMPTY"
         + restriction
         + f" ORDER BY {order}, key ASC",
-        FIELDS,
+        FIELDS + ",comment",
     )
     now = datetime.now(UTC)
     return {

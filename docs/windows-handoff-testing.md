@@ -35,6 +35,17 @@ jira epic list
 jira my today
 ```
 
+`my today` uses an issue table with Key, Summary, Status, Priority, Due Date,
+Updated, Latest Comment and Attention columns. The latest accessible comment
+includes the author's display name, timestamp and multiline text; absent comments
+show `—`. Comments are requested with the issue search, with a latest-comment
+request only when Jira returns an incomplete comment history. Compare the latest
+comment against Jira's UI, including an issue with a long history and any comments
+restricted from the PAT user. Verify blockers and inferred risks are readable
+text, missing values show `—`, and the scope/sort header matches the command.
+Check `jira my today --project WWRAP --sort priority --format table` and compare
+its rows/order with `--format json`. `--quiet` must suppress all output.
+
 Compare with Jira's UI: key/URL/summary/type, configured priority and status names,
 assignee display name/email availability, and direct Epic association. Check a
 known `Last, First` name is reordered only when unambiguous. Missing assignees or
@@ -45,6 +56,8 @@ inaccessible epics have empty names. Epic lists show exactly Key, Epic Name,
 Summary, Status, Priority, Assignee, My Active Stories, in that order.
 
 Views use a wrapping Field/Value table with the latest accessible comment.
+The default Story view also shows Description, preserving line breaks and wrapping
+long text; a missing description shows `—`.
 Detailed views retain those fields, add the full description, created/updated
 dates, attachment filenames and related issue keys, and show one comment per row,
 newest first with multiline content. Check a paged history against Jira's UI;

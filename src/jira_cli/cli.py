@@ -140,6 +140,9 @@ def emit(data: object, args: argparse.Namespace, token: str | None = None) -> No
         sys.stdout.write(encoded + "\n")
         return
     safe = json.loads(encoded)
+    if args.command == "my" and args.action == "today":
+        presentation.my_today(safe)
+        return
     if args.command in {"issue", "story", "epic"} and args.action == "list":
         presentation.issue_list(safe, args.command)
         return

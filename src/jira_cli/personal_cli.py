@@ -134,7 +134,7 @@ def execute(
         presenter = IssueViews(client, config)
         result["issues"] = [
             {
-                **presenter.normalize(row),
+                **presenter.normalize(row, include_latest_comment=True),
                 "due_date": personal.fields(row).get("duedate"),
                 "updated": personal.fields(row).get("updated"),
                 "blockers": row["blockers"],

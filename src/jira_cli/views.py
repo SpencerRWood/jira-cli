@@ -193,6 +193,7 @@ class IssueViews:
         *,
         detail: bool = False,
         include_description: bool = False,
+        include_latest_comment: bool = False,
     ) -> dict[str, Any]:
         data = self.fields(issue)
         epic = self.epic(data)
@@ -212,6 +213,7 @@ class IssueViews:
         }
         if include_description or detail:
             result["description"] = data.get("description")
+        if include_description or detail or include_latest_comment:
             comments = self.comments(issue, detail=detail)
             result["latest_comment"] = comments[0] if comments else None
         if detail:

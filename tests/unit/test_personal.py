@@ -505,6 +505,188 @@ def test_today_does_not_read_saved_issue_context(
     assert invoke(["my", "today"], capsys)["scope"] == "all-accessible-projects"
 
 
+@pytest.mark.parametrize("options", [[], ["--format", "table"]])
+def test_today_renders_issue_rows_with_attention(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    options: list[str],
+) -> None:
+    monkeypatch.setenv("COLUMNS", "220")
+    first = issue("WWRAP-10")
+    first["fields"].update(
+        summary="Review fixture validation",
+        duedate="2000-01-01",
+        updated="2000-01-01T10:30:00+00:00",
+        issuelinks=[
+            {"type": {"inward": "is blocked by"}, "inwardIssue": issue("OTHER-20")}
+        ],
+    )
+    setup(network, [], [first, issue("WWRAP-11")])
+    args = ["my", "today", "--project", "WWRAP", "--sort", "priority"]
+    assert main([*args, *options]) == 0
+    output = capsys.readouterr().out
+    assert "Scope: WWRAP  Sort: priority" in output
+    assert "My Today (2)" in output
+    labels = [
+        "Key",
+        "Summary",
+        "Status",
+        "Priority",
+        "Due Date",
+        "Updated",
+        "Latest Comment",
+        "Attention",
+    ]
+    positions = [output.index(label) for label in labels]
+    assert positions == sorted(positions)
+    assert output.index("WWRAP-10") < output.index("WWRAP-11")
+    assert "Review fixture validation" in output
+    assert "Blocked by: OTHER-20" in output
+    assert "Inferred: Overdue by due date; not proof of a blocker." in output
+    assert "2000-01-01 10:30 +0000" in output
+    assert "—" in output
+    assert '"issues"' not in output
+    assert '"name"' not in output
+    assert len(network[1]) == 1
+    query = network[1][0].url.params["jql"]
+    assert 'project = "WWRAP"' in query
+    assert "ORDER BY priority DESC, key ASC" in query
+    result = invoke(args, capsys)
+    assert result["issues"][0]["blockers"] == ["OTHER-20"]
+    assert result["issues"][1]["due_date"] is None
+    assert main([*args, "--quiet"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_today_empty_table(
+    network: Network, capsys: pytest.CaptureFixture[str]
+) -> None:
+    setup(network, [], [])
+    assert main(["my", "today"]) == 0
+    output = capsys.readouterr().out
+    assert "Scope: all-accessible-projects  Sort: due-date" in output
+    assert "No matching issues." in output
+    assert invoke(["my", "today"], capsys)["issues"] == []
+
+
+def test_today_table_escapes_controls_and_redacts_pat(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    row = issue("WWRAP-10")
+    row["fields"]["summary"] = "fixture-pat-never-print\x1b[31m\nFixture summary"
+    row["fields"]["priority"]["iconUrl"] = "HIDDEN_ICON"
+    row["fields"]["comment"] = {
+        "comments": [
+            {
+                "body": "fixture-pat-never-print\x1b[31m",
+                "author": {"displayName": "Smith, Jane"},
+            }
+        ]
+    }
+    setup(network, [], [row])
+    assert main(["my", "today"]) == 0
+    output = capsys.readouterr().out
+    assert "fixture-pat-never-print" not in output
+    assert "\x1b" not in output
+    assert "HIDDEN_ICON" not in output
+    assert 'summary"' not in output
+    result = invoke(["my", "today"], capsys)
+    assert result["issues"][0]["summary"].startswith("[REDACTED]")
+    assert result["issues"][0]["latest_comment"]["body"].startswith("[REDACTED]")
+
+
+def test_today_latest_comment_uses_search_data(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "260")
+    row = issue("WWRAP-10")
+    row["fields"]["comment"] = {
+        "total": 2,
+        "comments": [
+            {
+                "id": "1",
+                "body": "Older comment",
+                "created": "2026-10-26T10:30:00+00:00",
+            },
+            {
+                "id": "2",
+                "body": "Latest fixture comment\nSecond fixture line",
+                "created": "2026-10-27T10:30:00+00:00",
+                "author": {
+                    "displayName": "Smith, Jane",
+                    "avatarUrls": {"48": "HIDDEN_AVATAR"},
+                },
+            },
+        ],
+    }
+    setup(network, [], [row, issue("WWRAP-11")])
+    assert main(["my", "today"]) == 0
+    output = capsys.readouterr().out
+    assert "Latest fixture comment" in output
+    assert "Second fixture line" in output
+    assert "Jane Smith" in output
+    assert "2026-10-27 10:30 +0000" in output
+    assert "Older comment" not in output
+    assert "HIDDEN_AVATAR" not in output
+    assert len(network[1]) == 1
+    assert "comment" in network[1][0].url.params["fields"].split(",")
+    result = invoke(["my", "today"], capsys)
+    latest = result["issues"][0]["latest_comment"]
+    assert latest["id"] == "2"
+    assert latest["author"] == {"name": "Jane Smith"}
+    assert latest["body"] == "Latest fixture comment\nSecond fixture line"
+    assert result["issues"][1]["latest_comment"] is None
+    assert "description" not in result["issues"][0]
+    assert "comments" not in result["issues"][0]
+    assert len(network[1]) == 2
+
+
+def test_today_incomplete_comments_fetches_only_latest(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    row = issue("WWRAP-10")
+    row["fields"]["comment"] = {"total": 200, "comments": [{"body": "Oldest comment"}]}
+    setup(network, [], [row, issue("WWRAP-11")])
+    network[0]["issue/WWRAP-10/comment"] = {
+        "total": 200,
+        "startAt": 0,
+        "comments": [
+            {
+                "id": "200",
+                "body": "Most recent accessible comment",
+                "created": "2026-10-28T10:30:00+00:00",
+            }
+        ],
+    }
+    result = invoke(["my", "today"], capsys)
+    assert result["issues"][0]["latest_comment"]["id"] == "200"
+    assert len(network[1]) == 2
+    request = network[1][1]
+    assert request.url.path.endswith("/issue/WWRAP-10/comment")
+    assert request.url.params["maxResults"] == "1"
+    assert request.url.params["orderBy"] == "-created"
+
+
+@pytest.mark.parametrize("comments", [None, {"comments": [], "total": 0}])
+def test_today_missing_comments_are_null(
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    comments: Any,
+) -> None:
+    row = issue("WWRAP-10")
+    row["fields"]["comment"] = comments
+    setup(network, [], [row])
+    assert invoke(["my", "today"], capsys)["issues"][0]["latest_comment"] is None
+    assert len(network[1]) == 1
+
+
 def test_personal_search_pagination(network: Network, application: Path) -> None:
     pages: list[int] = []
 
