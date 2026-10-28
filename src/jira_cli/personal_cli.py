@@ -12,7 +12,7 @@ from jira_cli import personal
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError, issue_key
 from jira_cli.context import ContextStore
-from jira_cli.presentation import cell
+from jira_cli.presentation import cell, linked
 from jira_cli.views import IssueViews
 
 
@@ -92,10 +92,15 @@ def select(
         ]
         table.add_row(
             *(
-                cell(
-                    value.replace(token, "[REDACTED]")
-                    if isinstance(value, str) and token
-                    else value
+                linked(
+                    cell(
+                        value.replace(token, "[REDACTED]")
+                        if isinstance(value, str) and token
+                        else value
+                    ),
+                    client.base_url.replace(token, "[REDACTED]")
+                    if token
+                    else client.base_url,
                 )
                 for value in values
             )

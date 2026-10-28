@@ -182,7 +182,13 @@ def execute(
             else args.epic
         )
         if args.action == "story":
-            epic_context.notice(epic, args)
+            epic_context.notice(
+                epic,
+                args,
+                jira_url=client.base_url.replace(
+                    client.token.get_secret_value(), "[REDACTED]"
+                ),
+            )
         return service.create(
             Creation(
                 args.action.title(),

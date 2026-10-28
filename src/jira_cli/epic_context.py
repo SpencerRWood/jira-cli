@@ -1,11 +1,13 @@
 """Verified Epic scoping for Story commands, without changing saved context."""
 
 import argparse
-import sys
+
+from rich.console import Console
 
 from jira_cli.client import JiraClient
 from jira_cli.config import Config, UserError, issue_key
 from jira_cli.context import ContextStore
+from jira_cli.presentation import linked
 from jira_cli.views import IssueViews, named
 
 
@@ -36,9 +38,13 @@ def resolve(
     return issue_key(key) if kind.casefold() == "epic" else None
 
 
-def notice(epic: str | None, args: argparse.Namespace) -> None:
+def notice(
+    epic: str | None, args: argparse.Namespace, *, jira_url: str | None = None
+) -> None:
     if epic and args.format == "table" and not args.quiet:
         origin = "Epic override" if args.epic else "Epic context"
-        sys.stderr.write(
-            f"{origin}: {issue_key(epic)} — Stories scoped to this Epic.\n"
+        Console(stderr=True, markup=False, highlight=False).print(
+            linked(
+                f"{origin}: {issue_key(epic)} — Stories scoped to this Epic.", jira_url
+            )
         )

@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 from jira_cli.config import UserError
+from jira_cli.presentation import linked
 
 COLUMNS = [
     "key",
@@ -114,12 +115,14 @@ def render_markdown(data: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_table(data: dict[str, Any]) -> str:
+def render_table(
+    data: dict[str, Any], *, jira_url: str | None = None, hyperlinks: bool = False
+) -> str:
     stream = io.StringIO()
     console = Console(
         file=stream,
-        force_terminal=False,
-        color_system=None,
+        force_terminal=hyperlinks,
+        color_system="standard" if hyperlinks else None,
         width=120,
         markup=False,
         highlight=False,
@@ -142,8 +145,11 @@ def render_table(data: dict[str, Any]) -> str:
             ]
         }
         table.add_row(
-            *(cell(row[k]) for k in ["key", "summary", "status", "priority"]),
-            cell(evidence),
+            *(
+                linked(cell(row[k]), jira_url if row.get("url") else None)
+                for k in ["key", "summary", "status", "priority"]
+            ),
+            linked(cell(evidence), jira_url if row.get("url") else None),
         )
     console.print(table)
     return stream.getvalue()
@@ -169,10 +175,20 @@ def save(path: Path, content: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def emit(data: object, args: argparse.Namespace) -> None:
+def emit(
+    data: object, args: argparse.Namespace, *, jira_url: str | None = None
+) -> None:
     if not isinstance(data, dict):
         raise UserError("Report data is invalid.")
-    renderers = {"table": render_table, "csv": render_csv, "markdown": render_markdown}
+    renderers = {
+        "table": lambda value: render_table(
+            value,
+            jira_url=jira_url,
+            hyperlinks=args.output is None and Console().is_terminal,
+        ),
+        "csv": render_csv,
+        "markdown": render_markdown,
+    }
     content = (
         json.dumps(data, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
         if args.format == "json"
