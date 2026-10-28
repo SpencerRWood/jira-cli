@@ -249,7 +249,7 @@ def test_terminal_report_links_and_saved_table_is_plain(
     assert BASE + "/browse/WWRAP-10" in targets(capsys.readouterr().out)
     args.output = tmp_path / "report.txt"
     report_cli.emit(report(), args, jira_url=BASE)
-    assert "\x1b" not in args.output.read_text()
+    assert "\x1b" not in args.output.read_text(encoding="utf-8")
     assert capsys.readouterr().out == ""
     data = report()
     data["issues"][0]["url"] = ""
