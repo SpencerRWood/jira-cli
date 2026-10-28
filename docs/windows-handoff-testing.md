@@ -35,7 +35,8 @@ jira epic list
 jira my today
 ```
 
-`my today` uses an issue table with Key, Summary, Status, Priority, Due Date,
+`my today` defaults to staleness sorting (oldest update first) and excludes Epics.
+Its issue table includes Key, Summary, Status, Priority, Due Date,
 Updated, Latest Comment and Attention columns. The latest accessible comment
 includes the author's display name, timestamp and multiline text; absent comments
 show `—`. Comments are requested with the issue search, with a latest-comment

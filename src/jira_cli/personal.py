@@ -254,7 +254,7 @@ def my_today(
     }[sort]
     restriction = f' AND project = "{project_key(project)}"' if project else ""
     rows = client.search(
-        "assignee = currentUser() AND resolution IS EMPTY"
+        'assignee = currentUser() AND resolution IS EMPTY AND issuetype != "Epic"'
         + restriction
         + f" ORDER BY {order}, key ASC",
         FIELDS + ",comment",
