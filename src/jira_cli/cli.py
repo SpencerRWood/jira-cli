@@ -127,7 +127,13 @@ def redact(data: object, token: str) -> object:
     return data
 
 
-def emit(data: object, args: argparse.Namespace, token: str | None = None) -> None:
+def emit(
+    data: object,
+    args: argparse.Namespace,
+    token: str | None = None,
+    *,
+    jira_url: str | None = None,
+) -> None:
     if args.quiet:
         return
     if token is None:
@@ -140,21 +146,25 @@ def emit(data: object, args: argparse.Namespace, token: str | None = None) -> No
         sys.stdout.write(encoded + "\n")
         return
     safe = json.loads(encoded)
+    safe_url = jira_url.replace(token, "[REDACTED]") if jira_url and token else jira_url
     if args.command == "my" and args.action == "today":
-        presentation.my_today(safe)
+        presentation.my_today(safe, jira_url=safe_url)
         return
     if args.command in {"issue", "story", "epic"} and args.action == "list":
-        presentation.issue_list(safe, args.command)
+        presentation.issue_list(safe, args.command, jira_url=safe_url)
         return
     if args.command in {"issue", "story", "epic"} and args.action == "view":
-        presentation.issue_view(safe, detail=args.detail)
+        presentation.issue_view(safe, detail=args.detail, jira_url=safe_url)
         return
     if args.command == "context" and args.action in {"show", "set"}:
-        presentation.context_view(safe)
+        presentation.context_view(safe, jira_url=safe_url)
         return
     table = Table("Field", "Value")
     for key, value in safe.items() if isinstance(safe, dict) else [("result", safe)]:
-        table.add_row(str(key), json.dumps(value, ensure_ascii=False))
+        table.add_row(
+            str(key),
+            presentation.linked(json.dumps(value, ensure_ascii=False), safe_url),
+        )
     Console(markup=False, highlight=False).print(table)
 
 
@@ -240,7 +250,13 @@ def issues(
             if args.command == "story"
             else None
         )
-        epic_context.notice(epic, args)
+        epic_context.notice(
+            epic,
+            args,
+            jira_url=client.base_url.replace(
+                client.token.get_secret_value(), "[REDACTED]"
+            ),
+        )
         rows = listing.issues(args, presenter, project, epic=epic)
         return (
             personal_cli.select(rows, args, client, store)
@@ -299,14 +315,18 @@ def run(args: argparse.Namespace) -> None:
         emit(load_config(directory).model_dump(), args)
         return
     if args.command == "context":
-        emit(context_result(args, store, config), args)
+        emit(context_result(args, store, config), args, jira_url=config.jira.base_url)
         return
     token = read_pat(directory)
     client = JiraClient(config, token)
     try:
         if args.command == "report":
             report_cli.emit(
-                redact(reports(args, client, config), token.get_secret_value()), args
+                redact(reports(args, client, config), token.get_secret_value()),
+                args,
+                jira_url=client.base_url.replace(
+                    token.get_secret_value(), "[REDACTED]"
+                ),
             )
             return
         project = project_key(
@@ -322,7 +342,7 @@ def run(args: argparse.Namespace) -> None:
             result = personal_cli.execute(args, client, store, config, project)
         else:
             result = remote(args, client, store, config, project)
-        emit(result, args, token.get_secret_value())
+        emit(result, args, token.get_secret_value(), jira_url=client.base_url)
         if isinstance(result, dict) and result.get("success") is False:
             raise UserError(
                 str(

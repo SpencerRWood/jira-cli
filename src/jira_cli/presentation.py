@@ -1,13 +1,48 @@
 """Compact terminal lists; callers retain the full normalized JSON schema."""
 
 import json
+import re
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 from rich.console import Console
+from rich.style import Style
 from rich.table import Table
+from rich.text import Text
 
 from jira_cli.config import UserError
+
+KEY_PATTERN = re.compile(r"(?<![\w-])[A-Z][A-Z0-9_]*-[1-9][0-9]*(?![\w-])")
+
+
+def linked(value: str, jira_url: str | None = None) -> Text:
+    """Link visible keys to the configured Jira without interpreting markup."""
+    value = text(value)
+    result = Text(value)
+    if not jira_url or any(
+        ord(char) < 33 or 127 <= ord(char) <= 159 for char in jira_url
+    ):
+        return result
+    try:
+        parsed = urlsplit(jira_url)
+        _ = parsed.port
+    except ValueError:
+        return result
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        return result
+    base = jira_url.rstrip("/")
+    for match in KEY_PATTERN.finditer(value):
+        target = base + "/browse/" + quote(match[0], safe="")
+        result.stylize(Style(link=target, underline=True), match.start(), match.end())
+    return result
 
 
 def cell(value: object) -> str:
@@ -18,7 +53,7 @@ def cell(value: object) -> str:
     return encoded[1:-1] if isinstance(value, str) else encoded
 
 
-def issue_list(data: object, command: str) -> None:
+def issue_list(data: object, command: str, *, jira_url: str | None = None) -> None:
     console = Console(markup=False, highlight=False)
     epics = command == "epic"
     rows = data.get("epics") if epics and isinstance(data, dict) else data
@@ -51,7 +86,12 @@ def issue_list(data: object, command: str) -> None:
     elif command != "story":
         table.add_column("Epic", no_wrap=True)
     for row in rows:
-        table.add_row(*row_cells(row, epics=epics, stories=command == "story"))
+        table.add_row(
+            *(
+                linked(value, jira_url)
+                for value in row_cells(row, epics=epics, stories=command == "story")
+            )
+        )
     console.print(table)
 
 
@@ -71,7 +111,7 @@ def row_cells(row: dict[str, Any], *, epics: bool, stories: bool = False) -> lis
     return values
 
 
-def my_today(data: dict[str, Any]) -> None:
+def my_today(data: dict[str, Any], *, jira_url: str | None = None) -> None:
     console = Console(markup=False, highlight=False)
     console.print(
         "Scope: " + cell(data.get("scope")) + "  Sort: " + cell(data.get("sort"))
@@ -92,7 +132,7 @@ def my_today(data: dict[str, Any]) -> None:
         if blockers := row.get("blockers"):
             notes.append("Blocked by: " + ", ".join(blockers))
         notes.extend("Inferred: " + risk for risk in row.get("inferred_risks", []))
-        table.add_row(
+        values = [
             cell(row.get("key")),
             text(row.get("summary")),
             cell(row.get("status")),
@@ -101,7 +141,8 @@ def my_today(data: dict[str, Any]) -> None:
             timestamp(row.get("updated")),
             comment_text(row.get("latest_comment")),
             text("\n".join(notes)),
-        )
+        ]
+        table.add_row(*(linked(value, jira_url) for value in values))
     console.print(table)
 
 
@@ -111,7 +152,7 @@ def text(value: object) -> str:
         return cell(value)
     return "".join(
         char
-        if char == "\n" or (ord(char) >= 32 and ord(char) != 127)
+        if char == "\n" or (ord(char) >= 32 and not 127 <= ord(char) <= 159)
         else json.dumps(char)[1:-1]
         for char in value
     )
@@ -140,17 +181,19 @@ def comment_text(value: object) -> str:
     )
 
 
-def field_table(rows: list[tuple[str, object]]) -> Table:
+def field_table(
+    rows: list[tuple[str, object]], *, jira_url: str | None = None
+) -> Table:
     table = Table("Field", "Value", show_lines=True)
     table.columns[0].no_wrap = True
     table.columns[1].ratio = 1
     table.columns[1].overflow = "fold"
     for label, value in rows:
-        table.add_row(label, text(value))
+        table.add_row(label, linked(text(value), jira_url))
     return table
 
 
-def context_view(data: dict[str, Any]) -> None:
+def context_view(data: dict[str, Any], *, jira_url: str | None = None) -> None:
     keys = [
         ("Project", "project"),
         ("Issue", "issue"),
@@ -162,10 +205,12 @@ def context_view(data: dict[str, Any]) -> None:
     rows = [(label, data.get(key)) for label, key in keys]
     if data.get("warning"):
         rows.append(("Warning", data["warning"]))
-    Console(markup=False, highlight=False).print(field_table(rows))
+    Console(markup=False, highlight=False).print(field_table(rows, jira_url=jira_url))
 
 
-def issue_view(data: dict[str, Any], *, detail: bool) -> None:
+def issue_view(
+    data: dict[str, Any], *, detail: bool, jira_url: str | None = None
+) -> None:
     rows = [
         (label, data.get(key))
         for label, key in [("Key", "key"), ("URL", "url"), ("Summary", "summary")]
@@ -192,7 +237,7 @@ def issue_view(data: dict[str, Any], *, detail: bool) -> None:
     rows.append(("Latest Comment", comment_text(data.get("latest_comment"))))
     if detail:
         rows.extend(detail_rows(data))
-    console.print(field_table(rows))
+    console.print(field_table(rows, jira_url=jira_url))
     if detail:
         comment_table = Table("Author", "Timestamp", "Comment", show_lines=True)
         comment_table.columns[2].ratio = 2
@@ -201,7 +246,7 @@ def issue_view(data: dict[str, Any], *, detail: bool) -> None:
             comment_table.add_row(
                 cell(person(comment.get("author"))),
                 timestamp(comment.get("created")),
-                text(comment.get("body")),
+                linked(text(comment.get("body")), jira_url),
             )
         console.print(comment_table if comment_table.row_count else "Comments: —")
         console.print(
@@ -214,7 +259,7 @@ def issue_view(data: dict[str, Any], *, detail: bool) -> None:
                 for row in group.get("stories", [])
             ]
             console.print("Child Stories (" + cell(data.get("story_scope")) + ")")
-            issue_list(children, "story")
+            issue_list(children, "story", jira_url=jira_url)
 
 
 def detail_rows(data: dict[str, Any]) -> list[tuple[str, object]]:

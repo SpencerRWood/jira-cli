@@ -15,6 +15,15 @@ resolves that installation. Existing configuration and PAT remain in
 
 ## Read-only checks first
 
+Issue keys in terminal lists and views are hyperlinks to the configured Jira
+instance, including My Today, parent Epics, related issues, child Stories,
+context, pickers and terminal reports. Verify the terminal's follow-link gesture
+(often Ctrl+click) opens the correct issue in the browser. No Jira writes occur.
+Check PowerShell in Windows Terminal and the VS Code terminal separately; link
+support depends on the terminal host. Keys remain readable when links are not
+supported. JSON, CSV, Markdown and saved table reports remain free of terminal
+hyperlink escape sequences; redirected terminal tables remain plain text.
+
 Connect to the authorized corporate network. Replace example keys with existing
 accessible Story/Epic keys; do not create new issues for this phase.
 

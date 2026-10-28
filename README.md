@@ -137,6 +137,12 @@ argument syntax errors. Errors use stderr; `--quiet` suppresses successful stdou
 PAT values are redacted from terminal data, and errors omit response bodies and
 transport details. Structured output is JSON; table output is intended for people.
 
+Issue keys in terminal lists and views link to their Jira issues, including
+My Today, parent/child issues, context, pickers and terminal reports. Use your
+terminal's follow-link gesture (often Ctrl+click). Support depends on the terminal
+host; keys remain readable without it. JSON, CSV, Markdown, saved reports and
+redirected table output do not contain terminal hyperlink escape sequences.
+
 Enable PowerShell 7 completion in the current session:
 
 ```powershell
