@@ -98,6 +98,7 @@ class NameOutput(Model):
 
 
 class Output(Model):
+    comment_limit: int = Field(default=20, gt=0, le=1000)
     format: Literal["table", "json"] = "table"
     show_issue_urls: bool = True
     assignee: AssigneeOutput = Field(default_factory=AssigneeOutput)

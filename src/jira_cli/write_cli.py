@@ -41,6 +41,7 @@ def add_parsers(
                     epic_context.flags(leaf)
                 else:
                     leaf.add_argument("--epic")
+                    leaf.add_argument("--epic-name")
                 description = leaf.add_mutually_exclusive_group()
                 description.add_argument("--description")
                 description.add_argument("--description-file", type=Path)
@@ -123,6 +124,8 @@ def creation_values(args: argparse.Namespace) -> dict[str, Any]:
             )
         values.update(loaded)
     values.update(assignments(args.field))
+    if getattr(args, "epic_name", None) is not None:
+        values["epic_name"] = args.epic_name
     for name in ["summary", "priority", "assignee"]:
         if value := getattr(args, name):
             values[name] = value

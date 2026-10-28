@@ -80,7 +80,7 @@ def setup(
 
 
 @pytest.mark.parametrize("options", [[], ["--mine"]])
-def test_assigned_unresolved_epic_without_children_is_included(
+def test_done_category_epic_without_children_is_excluded(
     network: Network,
     capsys: pytest.CaptureFixture[str],
     options: list[str],
@@ -93,7 +93,7 @@ def test_assigned_unresolved_epic_without_children_is_included(
     other["fields"]["resolution"] = None
     setup(network, [unresolved, resolved, other, unresolved], [])
     result = invoke(["epic", "list", *options], capsys)
-    assert [row["key"] for row in result["epics"]] == ["WWRAP-1"]
+    assert result["epics"] == []
     query = next(
         r for r in network[1] if 'issuetype = "Epic"' in r.url.params.get("jql", "")
     )

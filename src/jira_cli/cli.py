@@ -143,6 +143,12 @@ def emit(data: object, args: argparse.Namespace, token: str | None = None) -> No
     if args.command in {"issue", "story", "epic"} and args.action == "list":
         presentation.issue_list(safe, args.command)
         return
+    if args.command in {"issue", "story", "epic"} and args.action == "view":
+        presentation.issue_view(safe, detail=args.detail)
+        return
+    if args.command == "context" and args.action in {"show", "set"}:
+        presentation.context_view(safe)
+        return
     table = Table("Field", "Value")
     for key, value in safe.items() if isinstance(safe, dict) else [("result", safe)]:
         table.add_row(str(key), json.dumps(value, ensure_ascii=False))
@@ -236,7 +242,7 @@ def issues(
         return (
             personal_cli.select(rows, args, client, store)
             if args.action == "select"
-            else [presenter.normalize(row) for row in rows]
+            else presenter.normalize_many(rows)
         )
     key = store.issue(args.issue or args.key)
     if args.action == "open":
@@ -248,6 +254,7 @@ def issues(
         return {"url": url}
     presenter = IssueViews(client, config)
     issue = presenter.get(key, "Story" if args.command == "story" else None)
+    presenter.enrich([issue])
     return presenter.normalize(issue, detail=args.detail, include_description=True)
 
 
@@ -289,7 +296,7 @@ def run(args: argparse.Namespace) -> None:
         emit(load_config(directory).model_dump(), args)
         return
     if args.command == "context":
-        emit(local(args, store), args)
+        emit(context_result(args, store, config), args)
         return
     token = read_pat(directory)
     client = JiraClient(config, token)
@@ -323,6 +330,46 @@ def run(args: argparse.Namespace) -> None:
             )
     finally:
         client.close()
+
+
+def context_result(
+    args: argparse.Namespace, store: ContextStore, config: Config
+) -> object:
+    result = local(args, store)
+    if args.action not in {"set", "show"}:
+        return result
+    current = store.selection(global_scope=args.global_scope)
+    if not current.issue:
+        return result
+    base = {
+        **(result if isinstance(result, dict) else {}),
+        "project": current.project or current.issue.rsplit("-", 1)[0],
+        "issue": current.issue,
+        "summary": None,
+        "status": None,
+        "epic_key": None,
+        "epic_name": None,
+    }
+    client = None
+    try:
+        client = JiraClient(config, read_pat(application_directory()))
+        presenter = IssueViews(client, config)
+        row = presenter.get(current.issue)
+        presenter.enrich([row])
+        normalized = presenter.normalize(row)
+        base.update(
+            {
+                key: normalized[key]
+                for key in ["summary", "status", "epic_key", "epic_name"]
+            }
+        )
+        base["project"] = current.issue.rsplit("-", 1)[0]
+    except UserError:
+        base["warning"] = "Current Jira data unavailable; saved context retained."
+    finally:
+        if client is not None:
+            client.close()
+    return base
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -498,7 +498,7 @@ def test_explicit_epic_parent_and_invalid_metadata(
     row.pop(LINK)
     row["parent"] = {"key": "WWRAP-100", "fields": {"issuetype": {"name": "Epic"}}}
     assert invoke(["issue", "view", "WWRAP-123"], capsys)["epic"] == "WWRAP-100"
-    assert not any(r.url.path.endswith("/field") for r in network[1])
+    assert len([r for r in network[1] if r.url.path.endswith("/field")]) == 1
     row.pop("parent")
     row[LINK] = "WWRAP-100"
     network[0]["field"] = {}
@@ -561,7 +561,7 @@ def test_lists_render_rows_and_keep_json_complete(
     assert "https://" not in output
     assert '"key":' not in output
     if command == "epic":
-        assert "Completed; active Stories" in output
+        assert "My Active Stories" in output
         assert "Filter: relevant" in output
     result = invoke([command, "list"], capsys)
     row = result["epics"][0] if command == "epic" else result[0]
