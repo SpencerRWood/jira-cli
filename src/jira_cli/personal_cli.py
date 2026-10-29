@@ -54,7 +54,7 @@ def add_parsers(
     limit.add_argument(
         "--all", action="store_true", help="Show all actionable Stories."
     )
-    today.add_argument("--no-blocked", action="store_true", help="Hide blocked table.")
+    today.add_argument("--no-review", action="store_true", help="Hide review table.")
 
 
 def positive_limit(value: str) -> int:
@@ -159,7 +159,7 @@ def execute(
             args.sort,
             limit=None if args.all else args.top or config.my_today.default_limit,
         )
-        result["show_blocked"] = not args.no_blocked
+        result["show_review"] = not args.no_review
         presenter = IssueViews(client, config)
 
         def normalize(row: dict[str, Any]) -> dict[str, Any]:
@@ -169,13 +169,13 @@ def execute(
                 "updated": personal.fields(row).get("updated"),
                 "blockers": row["blockers"],
                 "inferred_risks": row["inferred_risks"],
-                "blocking_indicators": row["blocking_indicators"],
-                "blocked_since": row["blocked_since"],
+                "needs_review": row["needs_review"],
+                "review_since": row["review_since"],
             }
 
         result["issues"] = [normalize(row) for row in result["issues"]]
         result["actionable"] = result["issues"]
-        result["blocked"] = [normalize(row) for row in result["blocked"]]
+        result["review"] = [normalize(row) for row in result["review"]]
         return result
     if args.action == "view":
         return personal.epic_view(

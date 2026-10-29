@@ -303,17 +303,21 @@ reported for an observed inward `is blocked by` link to an issue outside the
 Done status category. Missing dependency status is labeled an inferred risk;
 other/localized link descriptions are not guessed to mean blocking.
 
-All blocked Stories appear separately and never consume actionable slots.
-`my_today.blocked.statuses` accepts authoritative workflow status names or IDs.
-The unique Jira field named `Flagged` is discovered automatically; configure
-`my_today.blocked.flag_field` with its ID when necessary and
-`my_today.blocked.flag_values` with the authoritative option values (default
-`[Impediment]`). A status named `Blocked` is never assumed. Indicators are combined
-and deduplicated. Blocked Since shows `—`: search responses do not establish
+Stories in the `Review` workflow status need review and appear in a separate
+STORIES NEEDING REVIEW table. All unresolved Review Stories are included, independently
+of the actionable limit, and never consume a top-five slot. This replaces the earlier
+blocked table; dependency links and issue flags do not imply that a Story needs review.
+`my_today.review.statuses` accepts status names or IDs and defaults to `[Review]`.
+Matching is case-insensitive. Review Since shows `—`: search responses do not establish
 transition history, and updated/created dates are not substituted.
-`--no-blocked` hides the blocked table. JSON retains normalized `issues` as the
-displayed actionable subset and adds `actionable`, `blocked`, `actionable_total`,
-`blocked_total`, and `limit`.
+`--no-review` hides the review table. JSON retains normalized `issues` as the
+displayed actionable subset and adds `actionable`, `review`, `actionable_total`,
+`review_total`, and `limit`; rows include `needs_review` and `review_since`.
+
+When upgrading from the blocked-table build, replace the `my_today.blocked` section
+in the existing config.yaml with `my_today.review: {statuses: [Review]}`. The removed
+flag settings are no longer used. Update scripts from `--no-blocked` to `--no-review`
+and JSON consumers from `blocked`/`blocked_total` to `review`/`review_total`.
 
 Issue, Story and Epic descriptions share safe terminal rendering of HTML anchors,
 explicit HTML entities and Jira wiki links. Labels and destinations remain readable;

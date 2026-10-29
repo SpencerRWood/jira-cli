@@ -257,26 +257,15 @@ def my_today(
         "status": "status ASC",
         "staleness": "updated ASC",
     }.get(sort or "", "priority DESC")
-    blocked_config = config.my_today.blocked
-    metadata = IssueViews(client, config).field_metadata()
-    flag_fields = [
-        str(item["id"])
-        for item in metadata
-        if item.get("name") == "Flagged" and isinstance(item.get("id"), str)
-    ]
-    if blocked_config.flag_field:
-        flag_fields = [blocked_config.flag_field]
-    if len(flag_fields) > 1:
-        raise UserError("Flagged field is ambiguous; set my_today.blocked.flag_field.")
     restriction = f' AND project = "{project_key(project)}"' if project else ""
     rows = client.search(
         'assignee = currentUser() AND resolution IS EMPTY AND issuetype = "Story" '
         "AND statusCategory != Done" + restriction + f" ORDER BY {order}, key ASC",
-        ",".join([FIELDS, "comment", "resolution", *flag_fields]),
+        ",".join([FIELDS, "comment", "resolution"]),
     )
     now = datetime.now(UTC)
     actionable: list[dict[str, Any]] = []
-    blocked: list[dict[str, Any]] = []
+    review: list[dict[str, Any]] = []
     priority_order: dict[str, int] = {}
     seen: set[str] = set()
     for issue in rows:
@@ -295,36 +284,24 @@ def my_today(
         # Jira orders by its configured priority sequence, never by a name or ID.
         priority_order.setdefault(priority_id, len(priority_order))
         risk = risks(issue, now, config.reporting.aging_threshold_days)
-        indicators = ["dependency-link"] if risk["blockers"] else []
         status = data["status"]
-        if any(
+        needs_review = any(
             value.casefold()
             in {
                 str(status.get("id", "")).casefold(),
                 str(status.get("name", "")).casefold(),
             }
-            for value in blocked_config.statuses
-        ):
-            indicators.append("configured-status")
-        for field in flag_fields:
-            flags = data.get(field) or []
-            if not isinstance(flags, list):
-                raise UserError("Jira returned invalid blocking flags.")
-            if any(
-                isinstance(flag, dict)
-                and flag.get("value") in blocked_config.flag_values
-                for flag in flags
-            ):
-                indicators.append("issue-flag")
+            for value in config.my_today.review.statuses
+        )
         row = {
             **issue,
             "url": client.url(issue["key"]),
             **risk,
-            "blocking_indicators": indicators,
-            # Search updated/created times cannot establish blocking transitions.
-            "blocked_since": None,
+            "needs_review": needs_review,
+            # Search updated/created times cannot establish review transitions.
+            "review_since": None,
         }
-        (blocked if indicators else actionable).append(row)
+        (review if needs_review else actionable).append(row)
     if sort is None:
         actionable.sort(key=lambda row: urgency(row, priority_order, now))
     total = len(actionable)
@@ -337,8 +314,8 @@ def my_today(
         "issues": actionable,
         "actionable": actionable,
         "actionable_total": total,
-        "blocked": blocked,
-        "blocked_total": len(blocked),
+        "review": review,
+        "review_total": len(review),
         "limit": limit,
     }
 
