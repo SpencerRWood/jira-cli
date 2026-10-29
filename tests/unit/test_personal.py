@@ -523,6 +523,7 @@ def test_today_renders_issue_rows_with_attention(
             {"type": {"inward": "is blocked by"}, "inwardIssue": issue("OTHER-20")}
         ],
     )
+    first["fields"]["status"]["name"] = "Review"
     setup(network, [], [first, issue("WWRAP-11")])
     args = ["my", "today", "--project", "WWRAP", "--sort", "priority"]
     assert main([*args, *options]) == 0
@@ -530,7 +531,7 @@ def test_today_renders_issue_rows_with_attention(
     assert "Scope: WWRAP  Sort: priority" in output
     assert "MY TODAY — TOP 5 PRIORITIES" in output
     assert "Showing 1 of 1 actionable stories" in output
-    assert "BLOCKED STORIES" in output
+    assert "STORIES NEEDING REVIEW" in output
     labels = [
         "Key",
         "Summary",
@@ -548,12 +549,12 @@ def test_today_renders_issue_rows_with_attention(
     assert "—" in output
     assert '"issues"' not in output
     assert '"name"' not in output
-    assert len(network[1]) == 2
-    query = network[1][1].url.params["jql"]
+    assert len(network[1]) == 1
+    query = network[1][0].url.params["jql"]
     assert 'project = "WWRAP"' in query
     assert "ORDER BY priority DESC, key ASC" in query
     result = invoke(args, capsys)
-    assert result["blocked"][0]["blockers"] == ["OTHER-20"]
+    assert result["review"][0]["blockers"] == ["OTHER-20"]
     assert result["issues"][0]["due_date"] is None
     assert main([*args, "--quiet"]) == 0
     assert capsys.readouterr().out == ""
@@ -592,7 +593,7 @@ def test_today_defaults_to_urgency_and_excludes_non_stories(
     assert result["sort"] == "urgency"
     assert [row["key"] for row in result["issues"]] == ["WWRAP-11"]
     assert [row["type"] for row in result["issues"]] == ["Story"]
-    assert len(network[1]) == 2
+    assert len(network[1]) == 1
     assert main(["my", "today"]) == 0
     output = capsys.readouterr().out
     assert "Sort: urgency" in output
@@ -664,8 +665,8 @@ def test_today_latest_comment_uses_search_data(
     assert "2026-10-27 10:30 +0000" in output
     assert "Older comment" not in output
     assert "HIDDEN_AVATAR" not in output
-    assert len(network[1]) == 2
-    assert "comment" in network[1][1].url.params["fields"].split(",")
+    assert len(network[1]) == 1
+    assert "comment" in network[1][0].url.params["fields"].split(",")
     result = invoke(["my", "today"], capsys)
     latest = result["issues"][0]["latest_comment"]
     assert latest["id"] == "2"
@@ -674,7 +675,7 @@ def test_today_latest_comment_uses_search_data(
     assert result["issues"][1]["latest_comment"] is None
     assert "description" not in result["issues"][0]
     assert "comments" not in result["issues"][0]
-    assert len(network[1]) == 4
+    assert len(network[1]) == 2
 
 
 def test_today_incomplete_comments_fetches_only_latest(
@@ -697,8 +698,8 @@ def test_today_incomplete_comments_fetches_only_latest(
     }
     result = invoke(["my", "today"], capsys)
     assert result["issues"][0]["latest_comment"]["id"] == "200"
-    assert len(network[1]) == 3
-    request = network[1][2]
+    assert len(network[1]) == 2
+    request = network[1][1]
     assert request.url.path.endswith("/issue/WWRAP-10/comment")
     assert request.url.params["maxResults"] == "1"
     assert request.url.params["orderBy"] == "-created"
@@ -714,7 +715,7 @@ def test_today_missing_comments_are_null(
     row["fields"]["comment"] = comments
     setup(network, [], [row])
     assert invoke(["my", "today"], capsys)["issues"][0]["latest_comment"] is None
-    assert len(network[1]) == 2
+    assert len(network[1]) == 1
 
 
 def test_personal_search_pagination(network: Network, application: Path) -> None:

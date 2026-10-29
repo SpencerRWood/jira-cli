@@ -152,24 +152,24 @@ def my_today(data: dict[str, Any], *, jira_url: str | None = None) -> None:
         f"Showing {len(rows)} of {data.get('actionable_total', len(rows))} "
         "actionable stories"
     )
-    if data.get("show_blocked", True):
-        blocked = data.get("blocked", [])
-        blocked_table = Table(
+    if data.get("show_review", True):
+        review = data.get("review", [])
+        review_table = Table(
             "Key",
             "Summary",
             "Priority",
-            "Blocked Since",
-            title="BLOCKED STORIES",
+            "Review Since",
+            title="STORIES NEEDING REVIEW",
             show_lines=True,
         )
-        for row in blocked:
-            blocked_table.add_row(
+        for row in review:
+            review_table.add_row(
                 *(
                     linked(text(row.get(key)), jira_url)
-                    for key in ["key", "summary", "priority", "blocked_since"]
+                    for key in ["key", "summary", "priority", "review_since"]
                 )
             )
-        console.print(blocked_table if blocked else "No blocked stories")
+        console.print(review_table if review else "No stories needing review")
 
 
 def text(value: object) -> str:

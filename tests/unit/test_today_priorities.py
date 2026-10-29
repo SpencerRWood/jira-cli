@@ -22,7 +22,7 @@ def story(
             "summary": f"Story {number}",
             "status": {
                 "id": "17",
-                "name": "Review",
+                "name": "To Do",
                 "statusCategory": {"key": category},
             },
             "priority": {"id": priority, "name": priority},
@@ -37,26 +37,22 @@ def story(
 )
 def test_pagination_classification_and_limits(
     network: Network,
-    application: Path,
     capsys: pytest.CaptureFixture[str],
     args: list[str],
     count: int,
 ) -> None:
-    set_config(application, "my_today.blocked.statuses", "[Waiting]")
-    network[0]["field"] = [{"id": "customfield_19", "name": "Flagged"}]
-    blocked = story(9, customfield_19=[{"value": "Impediment"}])
-    blocked["fields"]["status"]["name"] = "Waiting"
+    review = story(9)
+    review["fields"]["status"]["name"] = "Review"
     rows = [
-        blocked,
+        review,
         *[story(i) for i in range(1, 9)],
-        blocked,
+        review,
         story(10, category="done"),
         story(11, resolution={"id": "1"}),
     ]
 
     def search(request: httpx.Request) -> httpx.Response:
         start = int(request.url.params["startAt"])
-        assert "customfield_19" in request.url.params["fields"]
         return httpx.Response(
             200,
             json={
@@ -72,12 +68,11 @@ def test_pagination_classification_and_limits(
     assert len(result["actionable"]) == count
     assert result["actionable_total"] == 8
     assert result["issues"] == result["actionable"]
-    assert result["blocked_total"] == 1
-    assert result["blocked"][0]["blocking_indicators"] == [
-        "configured-status",
-        "issue-flag",
-    ]
-    assert result["blocked"][0]["blocked_since"] is None
+    assert result["review_total"] == 1
+    assert result["review"][0]["needs_review"] is True
+    assert result["review"][0]["review_since"] is None
+    assert all(row["needs_review"] is False for row in result["actionable"])
+    assert "blocked" not in result
 
 
 def test_urgency_uses_server_priority_order(
@@ -105,15 +100,65 @@ def test_urgency_uses_server_priority_order(
     ]
 
 
-def test_config_and_no_blocked(
+def test_config_and_no_review(
     network: Network, application: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     set_config(application, "my_today.default_limit", "1")
     network[0]["search"] = {"startAt": 0, "total": 2, "issues": [story(1), story(2)]}
-    assert main(["my", "today", "--no-blocked"]) == 0
+    assert main(["my", "today", "--no-review"]) == 0
     output = capsys.readouterr().out
     assert "Showing 1 of 2 actionable stories" in output
-    assert "No blocked stories" not in output
+    assert "No stories needing review" not in output
+
+
+@pytest.mark.parametrize("status", ["Peer Review", "17"])
+def test_configured_review_status_name_or_id(
+    network: Network, application: Path, capsys: pytest.CaptureFixture[str], status: str
+) -> None:
+    set_config(application, "my_today.review.statuses", f"[{status!r}]")
+    row = story(1)
+    row["fields"]["status"]["name"] = "Peer Review"
+    network[0]["search"] = {"startAt": 0, "total": 1, "issues": [row]}
+    assert main(["my", "today", "--format", "json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["actionable"] == []
+    assert result["review_total"] == 1
+    assert result["review"][0]["key"] == "WWRAP-1"
+
+
+def test_review_table_and_suppression(
+    network: Network, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = [story(i) for i in range(1, 9)]
+    for row in rows:
+        row["fields"]["status"]["name"] = "Review"
+    network[0]["search"] = {"startAt": 0, "total": 8, "issues": rows}
+    assert main(["my", "today", "--top", "1"]) == 0
+    output = capsys.readouterr().out
+    assert "STORIES NEEDING REVIEW" in output
+    assert "Review Since" in output
+    assert "WWRAP-8" in output
+    assert "Showing 0 of 0 actionable stories" in output
+    assert main(["my", "today", "--no-review", "--format", "json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["show_review"] is False
+    assert len(result["review"]) == 8
+
+
+def test_flags_and_dependencies_do_not_imply_review(
+    network: Network, capsys: pytest.CaptureFixture[str]
+) -> None:
+    row = story(
+        1,
+        customfield_19=[{"value": "Impediment"}],
+        issuelinks=[{"type": {"inward": "is blocked by"}, "inwardIssue": story(2)}],
+    )
+    network[0]["field"] = [{"id": "customfield_19", "name": "Flagged"}]
+    network[0]["search"] = {"startAt": 0, "total": 1, "issues": [row]}
+    assert main(["my", "today", "--format", "json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["review"] == []
+    assert result["actionable"][0]["blockers"] == ["WWRAP-2"]
 
 
 @pytest.mark.parametrize(

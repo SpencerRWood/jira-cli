@@ -45,17 +45,21 @@ jira my today
 jira my today --top 3
 jira my today --top 10
 jira my today --all
-jira my today --no-blocked
+jira my today --no-review
 ```
 
 `my today` defaults to the top five actionable unresolved Stories. Compare the
 total count and ranking against Jira: overdue, configured priority, In Progress
 category, earlier due date, most recent update, key. Check server-capped search
-pages, cross-project results, and explicit project scope. Configure authoritative
-blocked workflow statuses/IDs and verify the discovered Flagged field/options.
-All blocked Stories appear in a separate deduplicated table; none consume a slot.
-Blocked Since is `—` because search has no reliable transition evidence.
-Check `--top`, `--all`, `--no-blocked`, and both normalized JSON collections.
+pages, cross-project results, and explicit project scope. The `Review` workflow
+status means the item needs review. Verify `my_today.review.statuses` against
+the instance's status names/IDs (default `[Review]`). All unresolved Review Stories
+appear in a separate deduplicated table; none consume an actionable slot. Dependency
+links and issue flags alone do not classify Stories as needing review.
+Review Since is `—` because search has no reliable transition evidence.
+Check `--top`, `--all`, `--no-review`, and both normalized JSON collections.
+For an existing blocked-table config, replace `my_today.blocked` with
+`my_today.review: {statuses: [Review]}` and update scripts/JSON consumers per README.
 Its issue table includes Key, Summary, Status, Priority, Due Date,
 Updated, Latest Comment and Attention columns. The latest accessible comment
 includes the author's display name, timestamp and multiline text; absent comments

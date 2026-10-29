@@ -87,15 +87,13 @@ class Reporting(Model):
     weekly_lookback_days: int = Field(default=7, gt=0)
 
 
-class Blocked(Model):
-    statuses: list[str] = Field(default_factory=list)
-    flag_field: str | None = Field(default=None, pattern=r"^customfield_[0-9]+$")
-    flag_values: list[str] = Field(default_factory=lambda: ["Impediment"])
+class Review(Model):
+    statuses: list[str] = Field(default_factory=lambda: ["Review"], min_length=1)
 
 
 class MyToday(Model):
     default_limit: int = Field(default=5, gt=0)
-    blocked: Blocked = Field(default_factory=Blocked)
+    review: Review = Field(default_factory=Review)
 
 
 class AssigneeOutput(Model):

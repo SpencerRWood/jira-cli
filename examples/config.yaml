@@ -28,12 +28,9 @@ reporting:
   weekly_lookback_days: 7
 my_today:
   default_limit: 5
-  blocked:
-    # Authoritative status names or IDs; configure for your Jira instance.
-    statuses: []
-    # Null discovers the unique Flagged field; set an ID if ambiguous.
-    flag_field: null
-    flag_values: [Impediment]
+  review:
+    # Status names or IDs that mean a Story needs review.
+    statuses: [Review]
 output:
   format: table
   show_issue_urls: true
