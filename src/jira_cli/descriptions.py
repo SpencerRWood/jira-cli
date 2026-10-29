@@ -12,6 +12,7 @@ CODE = re.compile(
 )
 WIKI_LINK = re.compile(r"\[([^\]\n|]+)\|(https?://[^\]\n]+)\]|\[(https?://[^\]\n]+)\]")
 BARE_AMPERSAND = re.compile(r"&(?!\#[0-9]+;|\#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]+;)")
+BLOCK_TAGS = {"p", "div", "ul", "ol", "blockquote", "h1", "h2", "h3", "tr"}
 
 
 class DescriptionParser(HTMLParser):
@@ -40,7 +41,7 @@ class DescriptionParser(HTMLParser):
             self.hidden.append(tag)
         if self.hidden:
             return
-        if tag in {"p", "div", "ul", "ol", "pre", "blockquote"}:
+        if tag in BLOCK_TAGS:
             self.parts.append("\n")
         if tag == "br":
             self.parts.append("\n")
@@ -48,28 +49,8 @@ class DescriptionParser(HTMLParser):
             self.parts.append("\n* ")
         if tag == "a":
             self.anchors.append((dict(attrs).get("href") or "", len(self.parts)))
-        if tag not in {
-            "p",
-            "div",
-            "ul",
-            "ol",
-            "li",
-            "pre",
-            "code",
-            "blockquote",
-            "br",
-            "a",
-            "strong",
-            "b",
-            "i",
-            "em",
-            "span",
-            "h1",
-            "h2",
-            "h3",
-            "hr",
-        }:
-            self.parts.append(self.get_starttag_text() or "")
+        if tag == "img":
+            self.parts.append(dict(attrs).get("alt") or "")
 
     def handle_endtag(self, tag: str) -> None:
         if self.code:
@@ -86,25 +67,10 @@ class DescriptionParser(HTMLParser):
             return
         if tag == "a" and self.anchors:
             self.finish_anchor()
-        if tag in {"p", "div", "li", "pre", "blockquote"}:
+        if tag in BLOCK_TAGS or tag == "li":
             self.parts.append("\n")
-        elif tag not in {
-            "ul",
-            "ol",
-            "code",
-            "br",
-            "a",
-            "strong",
-            "b",
-            "i",
-            "em",
-            "span",
-            "h1",
-            "h2",
-            "h3",
-            "hr",
-        }:
-            self.parts.append("</" + tag + ">")
+        if tag in {"td", "th"}:
+            self.parts.append("  ")
 
     def handle_data(self, data: str) -> None:
         if not self.hidden:

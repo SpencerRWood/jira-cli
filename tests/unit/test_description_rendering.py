@@ -39,6 +39,7 @@ from jira_cli.presentation import text
         ),
         ("<code><script>literal</script></code>", "<script>literal</script>"),
         ("\tindented", "    indented"),
+        ('<img src="x" onerror="alert(1)" alt="Image">', "Image"),
     ],
 )
 def test_description(raw: str | None, expected: str | None) -> None:
