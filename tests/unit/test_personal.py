@@ -251,7 +251,7 @@ def test_today_across_projects_and_sort(
     assert "project =" not in request.url.params["jql"]
     assert "resolution IS EMPTY" in request.url.params["jql"]
     assert "currentUser()" in request.url.params["jql"]
-    assert 'issuetype != "Epic"' in request.url.params["jql"]
+    assert 'issuetype = "Story"' in request.url.params["jql"]
     assert (
         "ORDER BY "
         + {
@@ -528,7 +528,9 @@ def test_today_renders_issue_rows_with_attention(
     assert main([*args, *options]) == 0
     output = capsys.readouterr().out
     assert "Scope: WWRAP  Sort: priority" in output
-    assert "My Today (2)" in output
+    assert "MY TODAY — TOP 5 PRIORITIES" in output
+    assert "Showing 1 of 1 actionable stories" in output
+    assert "BLOCKED STORIES" in output
     labels = [
         "Key",
         "Summary",
@@ -541,21 +543,18 @@ def test_today_renders_issue_rows_with_attention(
     ]
     positions = [output.index(label) for label in labels]
     assert positions == sorted(positions)
-    assert output.index("WWRAP-10") < output.index("WWRAP-11")
+    assert output.index("WWRAP-11") < output.index("WWRAP-10")
     assert "Review fixture validation" in output
-    assert "Blocked by: OTHER-20" in output
-    assert "Inferred: Overdue by due date; not proof of a blocker." in output
-    assert "2000-01-01 10:30 +0000" in output
     assert "—" in output
     assert '"issues"' not in output
     assert '"name"' not in output
-    assert len(network[1]) == 1
-    query = network[1][0].url.params["jql"]
+    assert len(network[1]) == 2
+    query = network[1][1].url.params["jql"]
     assert 'project = "WWRAP"' in query
     assert "ORDER BY priority DESC, key ASC" in query
     result = invoke(args, capsys)
-    assert result["issues"][0]["blockers"] == ["OTHER-20"]
-    assert result["issues"][1]["due_date"] is None
+    assert result["blocked"][0]["blockers"] == ["OTHER-20"]
+    assert result["issues"][0]["due_date"] is None
     assert main([*args, "--quiet"]) == 0
     assert capsys.readouterr().out == ""
 
@@ -566,12 +565,12 @@ def test_today_empty_table(
     setup(network, [], [])
     assert main(["my", "today"]) == 0
     output = capsys.readouterr().out
-    assert "Scope: all-accessible-projects  Sort: staleness" in output
+    assert "Scope: all-accessible-projects  Sort: urgency" in output
     assert "No matching issues." in output
     assert invoke(["my", "today"], capsys)["issues"] == []
 
 
-def test_today_defaults_to_oldest_updates_and_excludes_epics(
+def test_today_defaults_to_urgency_and_excludes_non_stories(
     network: Network, capsys: pytest.CaptureFixture[str]
 ) -> None:
     older = issue("OTHER-10", kind="Bug")
@@ -581,8 +580,8 @@ def test_today_defaults_to_oldest_updates_and_excludes_epics(
 
     def search(request: httpx.Request) -> httpx.Response:
         assert request.url.params["jql"] == (
-            'assignee = currentUser() AND resolution IS EMPTY AND issuetype != "Epic"'
-            " ORDER BY updated ASC, key ASC"
+            'assignee = currentUser() AND resolution IS EMPTY AND issuetype = "Story" '
+            "AND statusCategory != Done ORDER BY priority DESC, key ASC"
         )
         return httpx.Response(
             200, json={"startAt": 0, "total": 2, "issues": [older, newer]}
@@ -590,14 +589,15 @@ def test_today_defaults_to_oldest_updates_and_excludes_epics(
 
     network[0]["search"] = search
     result = invoke(["my", "today"], capsys)
-    assert result["sort"] == "staleness"
-    assert [row["key"] for row in result["issues"]] == ["OTHER-10", "WWRAP-11"]
-    assert [row["type"] for row in result["issues"]] == ["Bug", "Story"]
-    assert len(network[1]) == 1
+    assert result["sort"] == "urgency"
+    assert [row["key"] for row in result["issues"]] == ["WWRAP-11"]
+    assert [row["type"] for row in result["issues"]] == ["Story"]
+    assert len(network[1]) == 2
     assert main(["my", "today"]) == 0
     output = capsys.readouterr().out
-    assert "Sort: staleness" in output
-    assert output.index("OTHER-10") < output.index("WWRAP-11")
+    assert "Sort: urgency" in output
+    assert "OTHER-10" not in output
+    assert "WWRAP-11" in output
 
 
 def test_today_table_escapes_controls_and_redacts_pat(
@@ -664,8 +664,8 @@ def test_today_latest_comment_uses_search_data(
     assert "2026-10-27 10:30 +0000" in output
     assert "Older comment" not in output
     assert "HIDDEN_AVATAR" not in output
-    assert len(network[1]) == 1
-    assert "comment" in network[1][0].url.params["fields"].split(",")
+    assert len(network[1]) == 2
+    assert "comment" in network[1][1].url.params["fields"].split(",")
     result = invoke(["my", "today"], capsys)
     latest = result["issues"][0]["latest_comment"]
     assert latest["id"] == "2"
@@ -674,7 +674,7 @@ def test_today_latest_comment_uses_search_data(
     assert result["issues"][1]["latest_comment"] is None
     assert "description" not in result["issues"][0]
     assert "comments" not in result["issues"][0]
-    assert len(network[1]) == 2
+    assert len(network[1]) == 4
 
 
 def test_today_incomplete_comments_fetches_only_latest(
@@ -697,8 +697,8 @@ def test_today_incomplete_comments_fetches_only_latest(
     }
     result = invoke(["my", "today"], capsys)
     assert result["issues"][0]["latest_comment"]["id"] == "200"
-    assert len(network[1]) == 2
-    request = network[1][1]
+    assert len(network[1]) == 3
+    request = network[1][2]
     assert request.url.path.endswith("/issue/WWRAP-10/comment")
     assert request.url.params["maxResults"] == "1"
     assert request.url.params["orderBy"] == "-created"
@@ -714,7 +714,7 @@ def test_today_missing_comments_are_null(
     row["fields"]["comment"] = comments
     setup(network, [], [row])
     assert invoke(["my", "today"], capsys)["issues"][0]["latest_comment"] is None
-    assert len(network[1]) == 1
+    assert len(network[1]) == 2
 
 
 def test_personal_search_pagination(network: Network, application: Path) -> None:

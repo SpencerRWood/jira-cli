@@ -87,6 +87,17 @@ class Reporting(Model):
     weekly_lookback_days: int = Field(default=7, gt=0)
 
 
+class Blocked(Model):
+    statuses: list[str] = Field(default_factory=list)
+    flag_field: str | None = Field(default=None, pattern=r"^customfield_[0-9]+$")
+    flag_values: list[str] = Field(default_factory=lambda: ["Impediment"])
+
+
+class MyToday(Model):
+    default_limit: int = Field(default=5, gt=0)
+    blocked: Blocked = Field(default_factory=Blocked)
+
+
 class AssigneeOutput(Model):
     name_format: Literal["first_last", "original"] = "first_last"
     include_email: bool = True
@@ -113,6 +124,7 @@ class Config(Model):
     context: Context = Field(default_factory=Context)
     epics: Epics = Field(default_factory=Epics)
     reporting: Reporting = Field(default_factory=Reporting)
+    my_today: MyToday = Field(default_factory=MyToday)
     output: Output = Field(default_factory=Output)
 
 

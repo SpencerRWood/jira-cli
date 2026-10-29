@@ -26,6 +26,14 @@ reporting:
   default_project: WWRAP
   aging_threshold_days: 14
   weekly_lookback_days: 7
+my_today:
+  default_limit: 5
+  blocked:
+    # Authoritative status names or IDs; configure for your Jira instance.
+    statuses: []
+    # Null discovers the unique Flagged field; set an ID if ambiguous.
+    flag_field: null
+    flag_values: [Impediment]
 output:
   format: table
   show_issue_urls: true

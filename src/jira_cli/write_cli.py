@@ -59,6 +59,13 @@ def add_parsers(
             elif name == "comment":
                 leaf.add_argument("text", nargs="?")
                 leaf.add_argument("--file", type=Path)
+                leaf.add_argument(
+                    "--mention",
+                    action="append",
+                    default=[],
+                    metavar="USERNAME",
+                    help="Resolve a Jira username; repeat for multiple mentions.",
+                )
             elif action == "field":
                 leaf.add_argument("field", nargs="?")
                 leaf.add_argument("value", nargs="?", default=MISSING)
@@ -207,7 +214,9 @@ def execute(
             raise UserError("Choose inline comment text or --file, not both.")
         body = read_text(args.file) if args.file else args.text
         return service.comment(
-            issue, body if body is not None else service.ask("Comment text", [])
+            issue,
+            body if body is not None else service.ask("Comment text", []),
+            tuple(args.mention),
         )
     if args.command == "assign":
         return service.assign_self(issue)

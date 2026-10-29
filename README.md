@@ -287,17 +287,37 @@ jira issue select
 jira epic select
 ```
 
-`my today` lists unresolved non-Epic issues assigned to the authenticated user
+`my today` lists unresolved Stories outside the Done status category assigned to you
 across all accessible projects. Only an explicit `--project` restricts this command; YAML,
-`JIRA_PROJECT`, and saved project context do not narrow it. By default, it sorts by
-staleness, showing the least recently updated issues first. Explicit `--sort due-date`,
+`JIRA_PROJECT`, and saved project context do not narrow it. By default, it shows five
+actionable Stories, ranked by overdue first, Jira's configured priority order,
+In Progress category before To Do, earlier due date, most recent update, then key.
+`--top N` overrides `my_today.default_limit` (default 5); `--all` removes the limit.
+Filtering and ranking follow retrieval of all search pages; the total actionable
+count is displayed. Explicit `--sort due-date`,
 `priority`, `status`, or `staleness` uses Jira's configured order, with
 the issue key as a tie breaker. Staleness means oldest last update first.
 Observation times and due-date comparisons use UTC. Overdue and stale items
 (using `reporting.aging_threshold_days`) are labeled inferred risks. Blockers are
-reported only for an observed inward `is blocked by` link to an issue outside the
+reported for an observed inward `is blocked by` link to an issue outside the
 Done status category. Missing dependency status is labeled an inferred risk;
 other/localized link descriptions are not guessed to mean blocking.
+
+All blocked Stories appear separately and never consume actionable slots.
+`my_today.blocked.statuses` accepts authoritative workflow status names or IDs.
+The unique Jira field named `Flagged` is discovered automatically; configure
+`my_today.blocked.flag_field` with its ID when necessary and
+`my_today.blocked.flag_values` with the authoritative option values (default
+`[Impediment]`). A status named `Blocked` is never assumed. Indicators are combined
+and deduplicated. Blocked Since shows `—`: search responses do not establish
+transition history, and updated/created dates are not substituted.
+`--no-blocked` hides the blocked table. JSON retains normalized `issues` as the
+displayed actionable subset and adds `actionable`, `blocked`, `actionable_total`,
+`blocked_total`, and `limit`.
+
+Issue, Story and Epic descriptions share safe terminal rendering of HTML anchors,
+explicit HTML entities and Jira wiki links. Labels and destinations remain readable;
+code and multiline text are preserved. JSON keeps the original description.
 
 `epic list` uses the selected project and the deduplicated union of open Epics
 assigned to you and Epics containing your active Stories. Active means outside
@@ -422,6 +442,15 @@ jira set field labels '["review","test"]' --issue WWRAP-123
 jira set epic WWRAP-100 --issue WWRAP-123
 jira set epic --clear --issue WWRAP-123
 ```
+
+Comments support inline `@username` and repeatable `--mention USERNAME`, including
+file input. Exact active Data Center usernames are resolved through `user/search`
+before submission and encoded as `[~username]`. Email addresses, code, existing
+Jira mentions and ordinary text are preserved. Lookup failure or ambiguity prevents
+the entire submission; input files remain unchanged. Browse users permission may
+be required. Successful output separates resolved users, submitted markup and
+comment creation from `notification_delivery: unverified`. Only a cooperating user
+in corporate Jira can confirm actual notification delivery.
 
 Field and status names above are examples: use names or IDs advertised by your
 instance. `set status` sends a valid transition ID, never a raw status update.

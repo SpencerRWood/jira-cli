@@ -46,9 +46,25 @@ def add_parsers(
     today.add_argument(
         "--sort",
         choices=["due-date", "priority", "status", "staleness"],
-        default="staleness",
-        help="Sort by staleness (oldest update first) by default.",
+        default=None,
+        help="Override the default actionable urgency ranking.",
     )
+    limit = today.add_mutually_exclusive_group()
+    limit.add_argument("--top", type=positive_limit, help="Maximum actionable Stories.")
+    limit.add_argument(
+        "--all", action="store_true", help="Show all actionable Stories."
+    )
+    today.add_argument("--no-blocked", action="store_true", help="Hide blocked table.")
+
+
+def positive_limit(value: str) -> int:
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use a positive integer for --top.") from exc
+    if result < 1:
+        raise argparse.ArgumentTypeError("Use a positive integer for --top.")
+    return result
 
 
 def require_picker(args: argparse.Namespace) -> None:
@@ -136,18 +152,30 @@ def execute(
 ) -> object:
     if args.command == "my":
         # My Today deliberately ignores default/env/saved project selection.
-        result = personal.my_today(client, config, args.project, args.sort)
+        result = personal.my_today(
+            client,
+            config,
+            args.project,
+            args.sort,
+            limit=None if args.all else args.top or config.my_today.default_limit,
+        )
+        result["show_blocked"] = not args.no_blocked
         presenter = IssueViews(client, config)
-        result["issues"] = [
-            {
+
+        def normalize(row: dict[str, Any]) -> dict[str, Any]:
+            return {
                 **presenter.normalize(row, include_latest_comment=True),
                 "due_date": personal.fields(row).get("duedate"),
                 "updated": personal.fields(row).get("updated"),
                 "blockers": row["blockers"],
                 "inferred_risks": row["inferred_risks"],
+                "blocking_indicators": row["blocking_indicators"],
+                "blocked_since": row["blocked_since"],
             }
-            for row in result["issues"]
-        ]
+
+        result["issues"] = [normalize(row) for row in result["issues"]]
+        result["actionable"] = result["issues"]
+        result["blocked"] = [normalize(row) for row in result["blocked"]]
         return result
     if args.action == "view":
         return personal.epic_view(
