@@ -8,6 +8,7 @@ from typing import Any
 from jira_cli.client import JiraClient, WriteUncertainError
 from jira_cli.config import Config, UserError, issue_key, project_key
 from jira_cli.context import ContextStore, Selection
+from jira_cli.mentions import prepare as prepare_mentions
 from jira_cli.metadata import (
     Ask,
     Fields,
@@ -360,11 +361,14 @@ class Mutations:
         )
         return {"key": issue, "transition": transition["id"]}
 
-    def comment(self, issue: str, body: str) -> dict[str, Any]:
+    def comment(
+        self, issue: str, body: str, mentions: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
         issue = issue_key(issue)
         if not body.strip():
             raise UserError("Comment text must not be empty.")
         self.gate("ADD_COMMENTS", issue=issue)
+        body, resolved = prepare_mentions(self.client, body, mentions)
         result = self.client.write(
             "POST", "issue/" + issue + "/comment", expected=201, body={"body": body}
         )
@@ -372,7 +376,17 @@ class Mutations:
             raise WriteUncertainError(
                 "Comment response was incomplete; inspect Jira before retrying."
             )
-        return {"key": issue, "comment_id": result["id"]}
+        outcome = {"key": issue, "comment_id": result["id"]}
+        if resolved:
+            outcome.update(
+                {
+                    "users_resolved": resolved,
+                    "mention_markup_submitted": True,
+                    "comment_created": True,
+                    "notification_delivery": "unverified",
+                }
+            )
+        return outcome
 
     def attach(self, issue: str, paths: list[Path]) -> dict[str, Any]:
         issue = issue_key(issue)

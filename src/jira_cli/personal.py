@@ -244,33 +244,122 @@ def risks(issue: dict[str, Any], now: datetime, stale_days: int) -> dict[str, An
 
 
 def my_today(
-    client: JiraClient, config: Config, project: str | None, sort: str
+    client: JiraClient,
+    config: Config,
+    project: str | None,
+    sort: str | None,
+    *,
+    limit: int | None = 5,
 ) -> dict[str, Any]:
     order = {
         "due-date": "duedate ASC",
         "priority": "priority DESC",
         "status": "status ASC",
         "staleness": "updated ASC",
-    }[sort]
+    }.get(sort or "", "priority DESC")
+    blocked_config = config.my_today.blocked
+    metadata = IssueViews(client, config).field_metadata()
+    flag_fields = [
+        str(item["id"])
+        for item in metadata
+        if item.get("name") == "Flagged" and isinstance(item.get("id"), str)
+    ]
+    if blocked_config.flag_field:
+        flag_fields = [blocked_config.flag_field]
+    if len(flag_fields) > 1:
+        raise UserError("Flagged field is ambiguous; set my_today.blocked.flag_field.")
     restriction = f' AND project = "{project_key(project)}"' if project else ""
     rows = client.search(
-        'assignee = currentUser() AND resolution IS EMPTY AND issuetype != "Epic"'
-        + restriction
-        + f" ORDER BY {order}, key ASC",
-        FIELDS + ",comment",
+        'assignee = currentUser() AND resolution IS EMPTY AND issuetype = "Story" '
+        "AND statusCategory != Done" + restriction + f" ORDER BY {order}, key ASC",
+        ",".join([FIELDS, "comment", "resolution", *flag_fields]),
     )
     now = datetime.now(UTC)
+    actionable: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    priority_order: dict[str, int] = {}
+    seen: set[str] = set()
+    for issue in rows:
+        data = fields(issue)
+        if issue["key"] in seen:
+            continue
+        seen.add(issue["key"])
+        if (
+            done(issue)
+            or data.get("resolution")
+            or str((data.get("issuetype") or {}).get("name", "")).casefold() != "story"
+        ):
+            continue
+        priority = data.get("priority") or {}
+        priority_id = str(priority.get("id") or priority.get("name") or "")
+        # Jira orders by its configured priority sequence, never by a name or ID.
+        priority_order.setdefault(priority_id, len(priority_order))
+        risk = risks(issue, now, config.reporting.aging_threshold_days)
+        indicators = ["dependency-link"] if risk["blockers"] else []
+        status = data["status"]
+        if any(
+            value.casefold()
+            in {
+                str(status.get("id", "")).casefold(),
+                str(status.get("name", "")).casefold(),
+            }
+            for value in blocked_config.statuses
+        ):
+            indicators.append("configured-status")
+        for field in flag_fields:
+            flags = data.get(field) or []
+            if not isinstance(flags, list):
+                raise UserError("Jira returned invalid blocking flags.")
+            if any(
+                isinstance(flag, dict)
+                and flag.get("value") in blocked_config.flag_values
+                for flag in flags
+            ):
+                indicators.append("issue-flag")
+        row = {
+            **issue,
+            "url": client.url(issue["key"]),
+            **risk,
+            "blocking_indicators": indicators,
+            # Search updated/created times cannot establish blocking transitions.
+            "blocked_since": None,
+        }
+        (blocked if indicators else actionable).append(row)
+    if sort is None:
+        actionable.sort(key=lambda row: urgency(row, priority_order, now))
+    total = len(actionable)
+    actionable = actionable if limit is None else actionable[:limit]
     return {
         "scope": project or "all-accessible-projects",
-        "sort": sort,
+        "sort": sort or "urgency",
         "observed_at": now.isoformat(),
         "time_zone": "UTC",
-        "issues": [
-            {
-                **issue,
-                "url": client.url(str(issue.get("key", ""))),
-                **risks(issue, now, config.reporting.aging_threshold_days),
-            }
-            for issue in rows
-        ],
+        "issues": actionable,
+        "actionable": actionable,
+        "actionable_total": total,
+        "blocked": blocked,
+        "blocked_total": len(blocked),
+        "limit": limit,
     }
+
+
+def urgency(
+    issue: dict[str, Any], priorities: dict[str, int], now: datetime
+) -> tuple[bool, int, bool, str, float, str]:
+    data = fields(issue)
+    due = str(data.get("duedate") or "9999-12-31")
+    priority = data.get("priority") or {}
+    identity = str(priority.get("id") or priority.get("name") or "")
+    updated = (
+        datetime.fromisoformat(data["updated"]).timestamp()
+        if data.get("updated")
+        else float("-inf")
+    )
+    return (
+        due >= now.date().isoformat(),
+        priorities[identity],
+        data["status"]["statusCategory"]["key"] != "indeterminate",
+        due,
+        -updated,
+        issue["key"],
+    )

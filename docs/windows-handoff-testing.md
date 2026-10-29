@@ -42,9 +42,20 @@ jira issue view WWRAP-123
 jira story list
 jira epic list
 jira my today
+jira my today --top 3
+jira my today --top 10
+jira my today --all
+jira my today --no-blocked
 ```
 
-`my today` defaults to staleness sorting (oldest update first) and excludes Epics.
+`my today` defaults to the top five actionable unresolved Stories. Compare the
+total count and ranking against Jira: overdue, configured priority, In Progress
+category, earlier due date, most recent update, key. Check server-capped search
+pages, cross-project results, and explicit project scope. Configure authoritative
+blocked workflow statuses/IDs and verify the discovered Flagged field/options.
+All blocked Stories appear in a separate deduplicated table; none consume a slot.
+Blocked Since is `—` because search has no reliable transition evidence.
+Check `--top`, `--all`, `--no-blocked`, and both normalized JSON collections.
 Its issue table includes Key, Summary, Status, Priority, Due Date,
 Updated, Latest Comment and Attention columns. The latest accessible comment
 includes the author's display name, timestamp and multiline text; absent comments
@@ -66,8 +77,12 @@ inaccessible epics have empty names. Epic lists show exactly Key, Epic Name,
 Summary, Status, Priority, Assignee, My Active Stories, in that order.
 
 Views use a wrapping Field/Value table with the latest accessible comment.
-The default Story view also shows Description, preserving line breaks and wrapping
+Default Issue, Story and Epic views show Description, preserving line breaks and wrapping
 long text; a missing description shows `—`.
+Compare plain URLs, HTML anchors, wiki links, multiple links and query parameters
+containing `&`, `?`, and `=` with Jira. Labels and destinations must be readable;
+encoded ampersands must decode once, and code/list indentation must remain useful.
+JSON must retain the original description, and no description write may occur.
 Detailed views retain those fields, add the full description, created/updated
 dates, attachment filenames and related issue keys, and show one comment per row,
 newest first with multiline content. Check a paged history against Jira's UI;
@@ -75,6 +90,23 @@ only comments accessible to the PAT user may appear. Detailed views default to
 20 comments; `jira config set output.comment_limit 50` changes that limit in the
 existing config.yaml (valid range 1–1000). Default views still show one comment.
 Epic details have a separate child Story table honoring `--mine`/`--all-stories`.
+
+## ENH-09 authorized mention verification
+
+Do this only after separate authorization to post a test comment, using an existing
+test Story and a cooperating user. Substitute their exact corporate username:
+
+```powershell
+jira comment add 'Mention notification test @jsmith' --issue $story
+jira comment add 'Explicit mention test' --mention jsmith --issue $story
+```
+
+Confirm separately: username resolved; Jira accepted the comment; the Jira UI shows
+a real user mention; the cooperating user received the expected notification if
+corporate configuration enables it. API acceptance alone does not prove delivery.
+Verify Browse users and Add comments permissions and restricted issue access.
+Record the actual Jira Data Center version and username/wiki-mention compatibility.
+No live comment was posted by the local automated tests.
 
 Context set/show displays project, issue, summary, status and parent epic key/name.
 Check an existing issue whose association was changed through an independently

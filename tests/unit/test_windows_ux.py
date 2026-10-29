@@ -174,6 +174,30 @@ def details(row: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize(
+    ("command", "key"),
+    [("story", "WWRAP-10"), ("epic", "WWRAP-100"), ("issue", "WWRAP-10")],
+)
+@pytest.mark.parametrize("options", [[], ["--detail"]])
+def test_description_terminal_and_original_json(  # noqa: PLR0913, PLR0917
+    ux: Network,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    key: str,
+    options: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "180")
+    raw = '<p>Docs: <a href="https://example.test?a=1&amp;b=2">Guide</a></p>'
+    ux[0]["issue/" + key]["fields"]["description"] = raw
+    assert main([command, "view", key, *options]) == 0
+    output = capsys.readouterr().out
+    assert "Guide: https://example.test?a=1&b=2" in output
+    assert "<a href" not in output
+    assert invoke([command, "view", key, *options], capsys)["description"] == raw
+    assert all(request.method == "GET" for request in ux[1])
+
+
+@pytest.mark.parametrize(
     ("command", "key"), [("story", "WWRAP-10"), ("epic", "WWRAP-100")]
 )
 def test_consistent_views_latest_and_detail(
@@ -201,7 +225,7 @@ def test_consistent_views_latest_and_detail(
     assert "Value" in output
     assert "Comment 27" in output
     assert "Comment 26" not in output
-    assert ("Full description" in output) == (command == "story")
+    assert "Full description" in output
     assert "HIDDEN" not in output
     assert main([command, "view", key, "--detail"]) == 0
     output = capsys.readouterr().out

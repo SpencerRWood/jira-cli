@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from jira_cli.config import UserError
+from jira_cli.descriptions import description
 
 KEY_PATTERN = re.compile(r"(?<![\w-])[A-Z][A-Z0-9_]*-[1-9][0-9]*(?![\w-])")
 
@@ -119,8 +120,11 @@ def my_today(data: dict[str, Any], *, jira_url: str | None = None) -> None:
     rows = data["issues"]
     if not rows:
         console.print("No matching issues.")
-        return
-    table = Table(title=f"My Today ({len(rows)})", show_lines=True)
+    limit = data.get("limit")
+    title = (
+        f"MY TODAY — TOP {limit} PRIORITIES" if limit else "MY TODAY — ALL PRIORITIES"
+    )
+    table = Table(title=title, show_lines=True)
     table.add_column("Key", no_wrap=True)
     table.add_column("Summary", ratio=3, overflow="fold")
     for label in ["Status", "Priority", "Due Date", "Updated"]:
@@ -144,6 +148,28 @@ def my_today(data: dict[str, Any], *, jira_url: str | None = None) -> None:
         ]
         table.add_row(*(linked(value, jira_url) for value in values))
     console.print(table)
+    console.print(
+        f"Showing {len(rows)} of {data.get('actionable_total', len(rows))} "
+        "actionable stories"
+    )
+    if data.get("show_blocked", True):
+        blocked = data.get("blocked", [])
+        blocked_table = Table(
+            "Key",
+            "Summary",
+            "Priority",
+            "Blocked Since",
+            title="BLOCKED STORIES",
+            show_lines=True,
+        )
+        for row in blocked:
+            blocked_table.add_row(
+                *(
+                    linked(text(row.get(key)), jira_url)
+                    for key in ["key", "summary", "priority", "blocked_since"]
+                )
+            )
+        console.print(blocked_table if blocked else "No blocked stories")
 
 
 def text(value: object) -> str:
@@ -215,8 +241,8 @@ def issue_view(
         (label, data.get(key))
         for label, key in [("Key", "key"), ("URL", "url"), ("Summary", "summary")]
     ]
-    if not detail and str(data.get("type") or "").casefold() == "story":
-        rows.append(("Description", data.get("description")))
+    if not detail:
+        rows.append(("Description", description(data.get("description"))))
     if data.get("type") == "Epic":
         rows.append(("Epic Name", data.get("epic_name")))
     else:
@@ -273,7 +299,7 @@ def detail_rows(data: dict[str, Any]) -> list[tuple[str, object]]:
         str(row["key"]) for row in data.get("related_issues", []) if row.get("key")
     )
     return [
-        ("Description", data.get("description")),
+        ("Description", description(data.get("description"))),
         ("Attachments", attachments),
         ("Related Issues", related),
         ("Created", timestamp(dates.get("created"))),
