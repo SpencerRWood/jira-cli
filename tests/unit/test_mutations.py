@@ -851,6 +851,148 @@ def test_status_uses_transition_and_required_fields(
     }
 
 
+@pytest.fixture
+def transition_comment(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    write_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    assert "summary" in write_metadata
+    specs: dict[str, Any] = network[0]["issue/WWRAP-1/transitions"]["transitions"][0][
+        "fields"
+    ]
+    specs["comment"] = {
+        "name": "Comment",
+        "required": True,
+        "schema": {"type": "array", "items": "comment"},
+        "operations": ["add"],
+    }
+    return specs
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.usefixtures("transition_comment")
+def test_transition_comment_is_one_request_and_preserves_text_and_context(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    application: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    interactive: bool,
+) -> None:
+    store = ContextStore(application, Config())
+    store.update(Selection(issue="WWRAP-1"))
+    before = (application / "state.json").read_bytes()
+    text = 'Ready for review\nWith "quotes", apostrophes and a `backtick`.'
+    args = [
+        "set",
+        "status",
+        "--comment",
+        text,
+        "--field",
+        "Resolution=Fixed",
+        "--format",
+        "json",
+    ]
+    if interactive:
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda: "31")
+    else:
+        args.extend(["In Progress", "--issue", "WWRAP-1", "--non-interactive"])
+    assert main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result == {"key": "WWRAP-1", "transition": "31", "comment_added": True}
+    sent = writes(network)
+    assert len(sent) == 1
+    assert sent[0].url.path.endswith("/WWRAP-1/transitions")
+    assert json.loads(sent[0].content) == {
+        "transition": {"id": "31"},
+        "fields": {"resolution": {"id": "1"}},
+        "update": {"comment": [{"add": {"body": text}}]},
+    }
+    assert (application / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("text", ["", " ", "\n\t"])
+def test_blank_transition_comment_never_contacts_jira(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    text: str,
+) -> None:
+    assert (
+        main(["set", "status", "Start", "--issue", "WWRAP-1", "--comment", text]) == 1
+    )
+    assert network[1] == []
+
+
+@pytest.mark.parametrize(
+    "failure", ["permission", "screen", "operations", "duplicate", "missing_resolution"]
+)
+def test_transition_comment_preflight_prevents_all_writes(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    transition_comment: dict[str, Any],
+    failure: str,
+) -> None:
+    args = [
+        "set",
+        "status",
+        "Start",
+        "--issue",
+        "WWRAP-1",
+        "--comment",
+        "Fixture",
+        "--non-interactive",
+    ]
+    if failure != "missing_resolution":
+        args.extend(["--field", "Resolution=Fixed"])
+    if failure == "permission":
+        network[0]["mypermissions"]["permissions"]["ADD_COMMENTS"]["havePermission"] = (
+            False
+        )
+    elif failure == "screen":
+        del transition_comment["comment"]
+    elif failure == "operations":
+        transition_comment["comment"]["operations"] = None
+    elif failure == "duplicate":
+        args.extend(["--field", "Comment=Duplicate"])
+    assert main(args) == 1
+    assert not writes(network)
+
+
+@pytest.mark.parametrize("failure", ["rejected", "timeout"])
+def test_transition_comment_failure_never_retries_or_posts_separate_comment(
+    network: tuple[dict[str, Any], list[httpx.Request]],
+    transition_comment: dict[str, Any],
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    assert "comment" in transition_comment
+    network[0]["POST issue/WWRAP-1/transitions"] = (
+        httpx.ReadTimeout("fixture-pat-never-print")
+        if failure == "timeout"
+        else httpx.Response(400, text="fixture-pat-never-print")
+    )
+    assert (
+        main(
+            [
+                "set",
+                "status",
+                "Start",
+                "--issue",
+                "WWRAP-1",
+                "--field",
+                "Resolution=Fixed",
+                "--comment",
+                "Fixture",
+            ]
+        )
+        == 1
+    )
+    sent = writes(network)
+    assert len(sent) == 1
+    assert sent[0].url.path.endswith("/transitions")
+    output = capsys.readouterr()
+    assert "comment_added" not in output.out
+    assert "fixture-pat-never-print" not in output.out + output.err
+
+
 @pytest.mark.parametrize(
     "command",
     [

@@ -441,6 +441,7 @@ jira comment add 'Authorized test comment' --issue WWRAP-123
 jira comment add --file '.\comment.txt' --issue WWRAP-123
 jira attach '.\selected file.txt' '.\another selected file.pdf' --issue WWRAP-123
 jira set status 'In Progress' --issue WWRAP-123 --non-interactive
+jira set status 'Review' --issue WWRAP-123 --comment 'Ready for peer review'
 jira set field priority High --issue WWRAP-123
 jira assign --issue WWRAP-123
 jira set field description --from-file '.\description.txt' --issue WWRAP-123
@@ -448,6 +449,19 @@ jira set field labels '["review","test"]' --issue WWRAP-123
 jira set epic WWRAP-100 --issue WWRAP-123
 jira set epic --clear --issue WWRAP-123
 ```
+
+`set status --comment 'Text'` submits the status transition and comment together
+in one [Jira transition request](https://docs.atlassian.com/software/jira/docs/api/REST/8.14.0/#api/2/issue-doTransition).
+The comment preserves multiline text and requires Add Comments permission plus a
+transition whose metadata advertises the Comment `add` operation. A required
+Comment field is satisfied by `--comment`; other required transition fields still
+use `--field` or the existing prompts. Empty comments and duplicate Comment field
+assignments are rejected. Omit the status to use the existing interactive
+transition-ID prompt, or omit `--issue` to use active context. Successful output
+includes `comment_added: true`. Context remains unchanged. A rejected request
+never triggers a separate comment post; uncertain outcomes must be inspected in
+Jira before retrying. The `--comment` text is sent as supplied; for automatic
+username mention resolution use the standalone comment command described below.
 
 Comments support inline `@username` and repeatable `--mention USERNAME`, including
 file input. Exact active Data Center usernames are resolved through `user/search`
