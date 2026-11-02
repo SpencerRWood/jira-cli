@@ -127,22 +127,43 @@ def test_configured_review_status_name_or_id(
 
 
 def test_review_table_and_suppression(
-    network: Network, capsys: pytest.CaptureFixture[str]
+    network: Network,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("COLUMNS", "180")
     rows = [story(i) for i in range(1, 9)]
     for row in rows:
         row["fields"]["status"]["name"] = "Review"
+    rows[0]["fields"]["comment"] = {
+        "comments": [
+            {
+                "id": "100",
+                "author": {"displayName": "Fixture Reviewer"},
+                "created": "2026-01-01T12:30:00+00:00",
+                "body": "Ready for peer review",
+            }
+        ],
+        "total": 1,
+    }
     network[0]["search"] = {"startAt": 0, "total": 8, "issues": rows}
     assert main(["my", "today", "--top", "1"]) == 0
     output = capsys.readouterr().out
     assert "STORIES NEEDING REVIEW" in output
     assert "Review Since" in output
+    review_output = output.split("STORIES NEEDING REVIEW", 1)[1]
+    assert "Latest Comment" in review_output
+    assert "Ready for peer review" in review_output
+    assert "Fixture Reviewer" in review_output
+    assert "2026-01-01 12:30 +0000" in review_output
     assert "WWRAP-8" in output
     assert "Showing 0 of 0 actionable stories" in output
     assert main(["my", "today", "--no-review", "--format", "json"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["show_review"] is False
     assert len(result["review"]) == 8
+    assert result["review"][0]["latest_comment"]["body"] == "Ready for peer review"
+    assert result["review"][1]["latest_comment"] is None
 
 
 def test_flags_and_dependencies_do_not_imply_review(
