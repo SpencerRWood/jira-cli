@@ -162,12 +162,16 @@ def my_today(data: dict[str, Any], *, jira_url: str | None = None) -> None:
             title="STORIES NEEDING REVIEW",
             show_lines=True,
         )
+        review_table.columns[1].ratio = 3
+        review_table.columns[1].overflow = "fold"
+        review_table.add_column("Latest Comment", ratio=2, overflow="fold")
         for row in review:
             review_table.add_row(
                 *(
                     linked(text(row.get(key)), jira_url)
                     for key in ["key", "summary", "priority", "review_since"]
-                )
+                ),
+                linked(comment_text(row.get("latest_comment")), jira_url),
             )
         console.print(review_table if review else "No stories needing review")
 

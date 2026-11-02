@@ -310,6 +310,8 @@ blocked table; dependency links and issue flags do not imply that a Story needs 
 `my_today.review.statuses` accepts status names or IDs and defaults to `[Review]`.
 Matching is case-insensitive. Review Since shows `—`: search responses do not establish
 transition history, and updated/created dates are not substituted.
+Latest Comment shows the most recent visible comment with its author and timestamp,
+or `—` when there is no visible comment, using the same format as actionable Stories.
 `--no-review` hides the review table. JSON retains normalized `issues` as the
 displayed actionable subset and adds `actionable`, `review`, `actionable_total`,
 `review_total`, and `limit`; rows include `needs_review` and `review_since`.
