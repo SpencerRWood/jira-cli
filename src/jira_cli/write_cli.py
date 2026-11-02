@@ -77,6 +77,10 @@ def add_parsers(
                     leaf.add_argument("--clear", action="store_true")
                 else:
                     leaf.add_argument("--field", action="append", default=[])
+                    leaf.add_argument(
+                        "--comment",
+                        help="Add this comment in the same status transition.",
+                    )
     attach = commands.add_parser("attach")
     flags(attach)
     attach.add_argument("files", nargs="+", type=Path)
@@ -231,7 +235,9 @@ def set_action(
     args: argparse.Namespace, service: Mutations, issue: str
 ) -> dict[str, Any]:
     if args.action == "status":
-        return service.transition(issue, args.value, assignments(args.field))
+        return service.transition(
+            issue, args.value, assignments(args.field), comment=args.comment
+        )
     if args.action == "epic":
         if args.clear and args.value:
             raise UserError("Choose an epic key or --clear, not both.")

@@ -238,6 +238,15 @@ automatic writes, bulk updates, or test-issue cleanup scripts.
 
 ## Record outcomes separately
 
+Only with separate authorization for a live transition/comment on a designated
+test issue, run `jira set status Review --issue WWRAP-123 --comment 'Fixture review note'`
+using an available transition name/ID and any required `--field` values. Confirm
+the target status and exactly one comment in Jira, with local context unchanged.
+The transition must advertise Comment with the `add` operation. Missing permission
+or unsupported transition metadata must prevent the request; do not change Jira
+configuration merely to manufacture a test. Mocked tests and Windows parsing
+checks do not establish corporate integration.
+
 Record the tested Git revision, command, exit code, sanitized observed result, and
 whether the result came from mocked tests, Windows CI, or the actual corporate
 instance. Track certificate/proxy policy, priority/category metadata availability,

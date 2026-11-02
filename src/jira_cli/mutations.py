@@ -319,10 +319,19 @@ class Mutations:
         return {"key": issue, "epic": value}
 
     def transition(
-        self, issue: str, name: str | None, values: dict[str, Any]
+        self,
+        issue: str,
+        name: str | None,
+        values: dict[str, Any],
+        *,
+        comment: str | None = None,
     ) -> dict[str, Any]:
         issue = issue_key(issue)
+        if comment is not None and not comment.strip():
+            raise UserError("Comment text must not be empty.")
         self.gate("TRANSITION_ISSUES", issue=issue)
+        if comment is not None:
+            self.permission("ADD_COMMENTS", issue=issue)
         data = self.client.object(
             "issue/" + issue + "/transitions", {"expand": "transitions.fields"}
         )
@@ -351,15 +360,38 @@ class Mutations:
             not isinstance(v, dict) for v in specs.values()
         ):
             raise UserError("Jira transition fields are not a metadata mapping.")
+        if comment is not None:
+            spec = specs.get("comment", {})
+            operations = spec.get("operations")
+            if not isinstance(operations, list) or "add" not in operations:
+                raise UserError(
+                    "Selected transition does not advertise adding comments. "
+                    "Ask your Jira administrator to enable Comment "
+                    "on its transition screen."
+                )
+            if any(find_field(key, specs) == "comment" for key in values):
+                raise UserError("Supply the transition comment once, using --comment.")
+            # The update operation satisfies even a required Comment field; do not
+            # prompt for it again or also submit it through fields.
+            specs = {key: spec for key, spec in specs.items() if key != "comment"}
         fields = prepare(values, specs, self.ask, required=True)
         self.check_targets(fields, specs, issue=issue)
+        body: dict[str, Any] = {
+            "transition": {"id": transition["id"]},
+            "fields": fields,
+        }
+        if comment is not None:
+            body["update"] = {"comment": [{"add": {"body": comment}}]}
         self.client.write(
             "POST",
             "issue/" + issue + "/transitions",
             expected=204,
-            body={"transition": {"id": transition["id"]}, "fields": fields},
+            body=body,
         )
-        return {"key": issue, "transition": transition["id"]}
+        result = {"key": issue, "transition": transition["id"]}
+        if comment is not None:
+            result["comment_added"] = True
+        return result
 
     def comment(
         self, issue: str, body: str, mentions: tuple[str, ...] = ()

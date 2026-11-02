@@ -21,6 +21,8 @@ jobs:
       - name: Verify PowerShell arguments without Jira requests
         shell: pwsh
         run: |
+          uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.value=="Review"; assert args.comment=="Ready for review"; assert args.issue=="WWRAP-123"' set status Review --issue WWRAP-123 --comment 'Ready for review'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.command=="watcher"; assert args.issue=="WWRAP-123"; assert args.watchers==("alice","bob")' watcher add --issue WWRAP-123 --watchers 'alice, bob'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.epic=="WWRAP-100"' story list --epic WWRAP-100
@@ -41,6 +43,8 @@ jobs:
           '@
           $env:JIRA_CLI_TEST_DESCRIPTION = $description
           try {
+            uv run --frozen python -c 'import os,sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.comment==os.environ["JIRA_CLI_TEST_DESCRIPTION"]' set status Review --issue WWRAP-123 --comment $description
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             foreach ($kind in @('story', 'epic')) {
               uv run --frozen python -c 'import sys; from jira_cli.cli import parser; args=parser().parse_args(sys.argv[1:]); assert args.watchers==("alice","bob")' create $kind --watchers 'alice, bob,alice'
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -74,6 +78,7 @@ jobs:
             'jira my today --to' = '--top'
             'jira my today --no-r' = '--no-review'
             'jira comment add --men' = '--mention'
+            'jira set status --com' = '--comment'
             'jira --project WWRAP epic list --with' = '--with-my-stories'
             'jira report daily --format c' = 'csv'
             'jira story v' = 'view'
