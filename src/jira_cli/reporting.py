@@ -198,6 +198,14 @@ def report_row(
     }
 
 
+def default_window_start(end: datetime, kind: str, config: Config) -> datetime:
+    return (
+        end - timedelta(days=config.reporting.weekly_lookback_days)
+        if kind == "weekly"
+        else end.replace(hour=0, minute=0, second=0, microsecond=0)
+    )
+
+
 def build(
     client: JiraClient,
     config: Config,
@@ -218,11 +226,7 @@ def build(
     start = (
         since_date(since)
         if since is not None
-        else (
-            end - timedelta(days=config.reporting.weekly_lookback_days)
-            if kind == "weekly"
-            else end.replace(hour=0, minute=0, second=0, microsecond=0)
-        )
+        else default_window_start(end, kind, config)
     )
     if start > end or (since and start == end):
         raise UserError("Report start must be earlier than its observation time.")
@@ -234,6 +238,12 @@ def build(
         REPORT_FIELDS,
     )
     categories = status_categories(client) if kind == "weekly" else {}
+    if now is None:
+        # Search pages may contain updates made after the request began. Freeze
+        # the live cutoff after initial collection, before validating history.
+        end = datetime.now(UTC)
+        if since is None:
+            start = default_window_start(end, kind, config)
     result = {}
     for issue in issues:
         row = report_row(client, issue, config, end)
