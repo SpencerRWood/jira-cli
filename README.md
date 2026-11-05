@@ -388,8 +388,11 @@ currently active, created before start, and also non-Done at start. Counts repre
 distinct issues, while `completed_at` preserves each qualifying transition.
 
 The weekly default is the rolling `reporting.weekly_lookback_days` (7) before one
-captured observation time; `--since` replaces the start with midnight UTC on the
-chosen date. Every format records UTC, the start, exclusive end, thresholds, counts,
+captured observation time; live reports freeze that cutoff after the initial issue
+search and status-metadata collection, before weekly history validation. Updates
+returned during initial collection can therefore be included. `--since` replaces
+the start with midnight UTC on the chosen date. Every format records UTC, the start,
+exclusive end, thresholds, counts,
 and definitions. Dates and history timestamps are normalized to UTC. Due dates are
 overdue before the observation UTC date; staleness uses elapsed time. Sorting by
 issue key and fixed time inputs make fixture reports reproducible. Jira searches

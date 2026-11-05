@@ -3,9 +3,9 @@ import csv
 import io
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import httpx
 import pytest
@@ -99,6 +99,163 @@ def build(
             reporting.Request(kind, "WWRAP", since=since),
             now=END,
         )
+    finally:
+        client.close()
+
+
+@pytest.fixture
+def report_clock(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
+    clock = [END]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            assert tz is UTC
+            return cls.fromisoformat(clock[0].isoformat())
+
+    monkeypatch.setattr(reporting, "datetime", Clock)
+    return clock
+
+
+@pytest.mark.parametrize("kind", ["weekly", "daily", "aging"])
+@pytest.mark.parametrize("since", [None, "2026-10-01"])
+def test_report_accepts_updates_returned_during_initial_collection(
+    network: Network,
+    application: Path,
+    report_clock: list[datetime],
+    kind: str,
+    since: str | None,
+) -> None:
+    set_config(application, "reporting.weekly_lookback_days", "3")
+    updated = END + timedelta(seconds=1)
+    collected = END + timedelta(seconds=2)
+    row = issue(1, updated=updated.isoformat())
+    setup(network, [row])
+
+    def search(_request: httpx.Request) -> httpx.Response:
+        report_clock[0] = collected
+        return httpx.Response(200, json={"startAt": 0, "total": 1, "issues": [row]})
+
+    def metadata(_request: httpx.Request) -> httpx.Response:
+        report_clock[0] = collected + timedelta(seconds=1)
+        return httpx.Response(200, json=list(STATES.values()))
+
+    network[0]["search"] = search
+    network[0]["status"] = metadata
+    client = JiraClient(load_config(application), SecretStr("fixture-pat-never-print"))
+    try:
+        result = reporting.build(
+            client,
+            load_config(application),
+            reporting.Request(kind, "WWRAP", since=since),
+        )
+    finally:
+        client.close()
+    observed = collected + timedelta(seconds=1) if kind == "weekly" else collected
+    assert result["window_end_exclusive"] == observed.isoformat()
+    expected_start = (
+        reporting.since_date(since)
+        if since
+        else observed - timedelta(days=3)
+        if kind == "weekly"
+        else observed.replace(hour=0, minute=0, second=0, microsecond=0)
+    )
+    assert result["window_start"] == expected_start.isoformat()
+    assert result["counts"]["issues"] == (0 if kind == "aging" else 1)
+
+
+def test_weekly_counts_completion_during_initial_collection(
+    network: Network,
+    application: Path,
+    report_clock: list[datetime],
+) -> None:
+    updated = END + timedelta(seconds=1)
+    row = issue(1, state="3", updated=updated.isoformat())
+    setup(network, [row])
+    history(network, 1, [event(1, updated.isoformat(), "2", "3")])
+
+    def search(_request: httpx.Request) -> httpx.Response:
+        report_clock[0] = END + timedelta(seconds=2)
+        return httpx.Response(200, json={"startAt": 0, "total": 1, "issues": [row]})
+
+    network[0]["search"] = search
+    client = JiraClient(load_config(application), SecretStr("fixture-pat-never-print"))
+    try:
+        result = reporting.build(
+            client, load_config(application), reporting.Request("weekly", "WWRAP")
+        )
+    finally:
+        client.close()
+    assert result["counts"]["completed_during_window"] == 1
+    assert result["issues"][0]["completed_at"] == [updated.isoformat()]
+
+
+def test_live_daily_window_tracks_midnight_crossed_during_collection(
+    network: Network,
+    application: Path,
+    report_clock: list[datetime],
+) -> None:
+    report_clock[0] = END.replace(hour=23, minute=59, second=59)
+    observed = (END + timedelta(days=1)).replace(hour=0, minute=0, second=1)
+    row = issue(1, updated=observed.replace(second=0).isoformat())
+    setup(network, [row])
+
+    def search(_request: httpx.Request) -> httpx.Response:
+        report_clock[0] = observed
+        return httpx.Response(200, json={"startAt": 0, "total": 1, "issues": [row]})
+
+    network[0]["search"] = search
+    client = JiraClient(load_config(application), SecretStr("fixture-pat-never-print"))
+    try:
+        result = reporting.build(
+            client, load_config(application), reporting.Request("daily", "WWRAP")
+        )
+    finally:
+        client.close()
+    assert result["window_start"] == observed.replace(second=0).isoformat()
+    assert result["window_end_exclusive"] == observed.isoformat()
+
+
+def test_explicit_report_cutoff_is_not_refreshed(
+    network: Network,
+    application: Path,
+    report_clock: list[datetime],
+) -> None:
+    row = issue(1)
+    setup(network, [row])
+
+    def search(_request: httpx.Request) -> httpx.Response:
+        report_clock[0] = END + timedelta(hours=2)
+        return httpx.Response(200, json={"startAt": 0, "total": 1, "issues": [row]})
+
+    network[0]["search"] = search
+    result = build(application)
+    assert result["window_end_exclusive"] == END.isoformat()
+    assert result["window_start"] == (END - timedelta(days=7)).isoformat()
+
+
+@pytest.mark.parametrize(
+    "failure", ["future_timestamp", "changed_issue", "incomplete_history"]
+)
+def test_live_cutoff_preserves_snapshot_and_history_checks(
+    network: Network,
+    application: Path,
+    report_clock: list[datetime],
+    failure: str,
+) -> None:
+    setup(network, [issue(1, updated=(END - timedelta(seconds=1)).isoformat())])
+    if failure == "future_timestamp":
+        report_clock[0] = END - timedelta(seconds=2)
+    elif failure == "changed_issue":
+        network[0]["issue/WWRAP-1"]["fields"]["updated"] = CREATED
+    else:
+        network[0]["issue/WWRAP-1"]["changelog"]["total"] = 1
+    client = JiraClient(load_config(application), SecretStr("fixture-pat-never-print"))
+    try:
+        with pytest.raises(UserError, match=r"changed|incomplete history"):
+            reporting.build(
+                client, load_config(application), reporting.Request("weekly", "WWRAP")
+            )
     finally:
         client.close()
 
